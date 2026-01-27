@@ -1,0 +1,9 @@
+Update booking details sent in email notifications
+
+Modify email_data dictionary to include missing fields, correct key names, and add fallbacks for template compatibility.
+
+Replit-Commit-Author: Agent
+Replit-Commit-Session-Id: 77f3f4bc-50a8-43ee-8dc6-15bc0074dca7
+Replit-Commit-Checkpoint-Type: full_checkpoint
+Replit-Commit-Event-Id: 29d0d42a-31a6-420c-8dfd-e99851013e0b
+Replit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/55419dfb-8584-4c25-bc6f-88dd66dd8614/77f3f4bc-50a8-43ee-8dc6-15bc0074dca7/RaT15i1

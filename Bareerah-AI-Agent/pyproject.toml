@@ -1,0 +1,26 @@
+[project]
+name = "python-template"
+version = "0.1.0"
+description = ""
+authors = ["Your Name <you@example.com>"]
+requires-python = ">=3.11"
+dependencies = [
+    "aiohttp>=3.13.2",
+    "bcrypt>=5.0.0",
+    "beautifulsoup4>=4.14.2",
+    "elevenlabs>=2.24.0",
+    "flask",
+    "flask-sock>=0.7.0",
+    "google-auth>=2.43.0",
+    "google-cloud-texttospeech>=2.33.0",
+    "httpx>=0.28.1",
+    "openai>=2.8.1",
+    "openpyxl>=3.1.5",
+    "psycopg2-binary>=2.9.11",
+    "pyjwt>=2.10.1",
+    "pyttsx3>=2.99",
+    "reportlab>=4.4.5",
+    "requests>=2.32.5",
+    "sift-stack-py>=0.9.1",
+    "twilio",
+]
