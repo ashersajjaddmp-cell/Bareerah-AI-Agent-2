@@ -1,3 +1,13 @@
+from dotenv import load_dotenv
+load_dotenv()  # ✅ Load environment variables from .env file
+
+import sys
+# ✅ Fix UnicodeEncodeError on Windows (console doesn't support emojis by default)
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+except Exception:
+    pass
+
 from flask import Flask, request, Response, jsonify, render_template, send_file
 from twilio.twiml.voice_response import VoiceResponse
 from twilio.rest import Client as TwilioClient
@@ -36,9 +46,9 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
 GOOGLE_CLOUD_TTS_KEY = os.environ.get("GOOGLE_CLOUD_TTS_KEY")
 WEBSITE_URL = os.environ.get("WEBSITE_URL", "")
-BASE_API_URL = "https://5ef5530c-38d9-4731-b470-827087d7bc6f-00-2j327r1fnap1d.sisko.replit.dev/api"
-BACKEND_BASE_URL = "https://5ef5530c-38d9-4731-b470-827087d7bc6f-00-2j327r1fnap1d.sisko.replit.dev"
-BOOKING_ENDPOINT = "https://5ef5530c-38d9-4731-b470-827087d7bc6f-00-2j327r1fnap1d.sisko.replit.dev/api/bookings/create-manual"
+BACKEND_BASE_URL = os.environ.get("BACKEND_BASE_URL", "https://5ef5530c-38d9-4731-b470-827087d7bc6f-00-2j327r1fnap1d.sisko.replit.dev")
+BASE_API_URL = f"{BACKEND_BASE_URL}/api"
+BOOKING_ENDPOINT = f"{BACKEND_BASE_URL}/api/bookings/create-manual"
 
 # ✅ EMAIL CONFIGURATION - RESEND SMTP (Fixed domain issue)
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
