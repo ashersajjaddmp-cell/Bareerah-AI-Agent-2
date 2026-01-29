@@ -1259,12 +1259,14 @@ def get_gather_params(call_sid: str, stt_language: str = None, utterance_num: in
         "enhanced": True
     }
     
-    # ✅ FIX: Use 'experimental_conversations' for better accuracy
-    params["speech_model"] = "experimental_conversations"
-    params["enhanced"] = True
-    
-    # ✅ FIX: Add hints to improve recognition of Dubai locations
-    params["hints"] = "Dubai, Airport, Marina, Mall, Burj Khalifa, downtown, pickup, dropoff, yes, no"
+    # ✅ Switch STT model after first 2 utterances
+    if utterance_num < 2:
+        params["speech_model"] = "phone_call"  # English-only, fast
+    else:
+        if stt_language in ["ur", "ar"]:
+            params["speech_model"] = "default"  # Triggers Whisper multi-lang
+        else:
+            params["speech_model"] = "phone_call"
     
     return params
 
