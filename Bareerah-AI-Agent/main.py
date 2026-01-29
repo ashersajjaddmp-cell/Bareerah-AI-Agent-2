@@ -1259,14 +1259,12 @@ def get_gather_params(call_sid: str, stt_language: str = None, utterance_num: in
         "enhanced": True
     }
     
-    # ✅ Switch STT model after first 2 utterances
-    if utterance_num < 2:
-        params["speech_model"] = "phone_call"  # English-only, fast
-    else:
-        if stt_language in ["ur", "ar"]:
-            params["speech_model"] = "default"  # Triggers Whisper multi-lang
-        else:
-            params["speech_model"] = "phone_call"
+    # ✅ RESTORED: Use 'experimental_conversations' for better accuracy (User Requested State)
+    params["speech_model"] = "experimental_conversations"
+    params["enhanced"] = True
+    
+    # ✅ FIX: Add hints to improve recognition of Dubai locations
+    params["hints"] = "Dubai, Airport, Marina, Mall, Burj Khalifa, downtown, pickup, dropoff, yes, no"
     
     return params
 
@@ -4040,7 +4038,7 @@ def handle_call():
                     elif current_lang == "ar":
                         response_text = f"Tamam! Dropoff bi {dropoff_location}. Wa kaina intiqalu?"
                     else:
-                        response_text = f"Perfect! Dropoff at {dropoff_location}. Where are you starting from?"
+                        response_text = f"Got it, dropping you at {dropoff_location}. And where should the driver pick you up?"
                 print(f"[FLOW] ✅ DROPOFF LOCKED: {dropoff_location}", flush=True)
             else:
                 print(f"[FLOW] ⚠️ LOW CONF ({nlu.get('confidence', 0):.1f}): Ask repeat", flush=True)
@@ -4071,7 +4069,7 @@ def handle_call():
                     elif current_lang == "ar":
                         response_text = f"Tabaan! Intiqalu min {pickup_location}. Ayana turid?"
                     else:
-                        response_text = f"Sure! Picking you from {pickup_location}. When do you need the ride?"
+                        response_text = f"Okay, picking up from {pickup_location}. What date and time works for you?"
                 print(f"[FLOW] ✅ PICKUP LOCKED: {pickup_location}", flush=True)
             response_text = nlu.get("response", "Sorry, say again?")
         
@@ -4214,7 +4212,7 @@ def handle_call():
                         elif current_lang == "ar":
                             response_text = f"Tamam! {day_word} {time_12h}. Kam safari?"
                         else:
-                            response_text = f"Perfect! {day_word} at {time_12h}. How many passengers?"
+                            response_text = f"Great, {day_word} at {time_12h} is booked. How many passengers are traveling?"
                     
                     if natural_dt:
                         print(f"[DATETIME] 📅 Dubai now: {now_dubai.strftime('%Y-%m-%d %H:%M')}, Requested: {dubai_dt.strftime('%Y-%m-%d %H:%M')} ({day_word})", flush=True)
@@ -4267,7 +4265,7 @@ def handle_call():
                 elif current_lang == "ar":
                     response_text = nlu.get("response", "Kam haqiba?")
                 else:
-                    response_text = nlu.get("response", "How many bags will you have?")
+                    response_text = nlu.get("response", "Understood. And how many pieces of luggage?")
         
         # ✅ STEP 5.5: ASK FOR CUSTOMER NAME (important for driver to call)
         elif ctx["flow_step"] == "name":
@@ -4420,7 +4418,12 @@ def handle_call():
                 # ✅ FIX: Only say "Noted:" if customer actually said something (notes were recorded)
                 # Don't say it if they said "skip", "no", "nahi", etc.
                 notes_msg = f"Noted: {ctx['notes']}. " if ctx["notes"] and len(ctx["notes"].strip()) > 0 else ""
-                response_text = f"{notes_msg}Based on {pax} passengers and {lug} bags, we recommend a {vehicle_model}. Your fare is {ctx['locked_slots']['fare']}. Confirm?"
+                if current_lang == "ur":
+                    response_text = f"{notes_msg} {pax} passengers aur {lug} bags ke liye, {vehicle_model} best hai. Fare {ctx['locked_slots']['fare']} hai. Confirm karein?"
+                elif current_lang == "ar":
+                     response_text = f"{notes_msg} Lil {pax} rukab wa {lug} haqayib, {vehicle_model} afdal. Ujra {ctx['locked_slots']['fare']}. Hal tuakid?"
+                else:
+                    response_text = f"{notes_msg}For {pax} passengers and {lug} bags, I've found a {vehicle_model} for you. The total fare is {ctx['locked_slots']['fare']}. Shall I confirm this ride?"
                 print(f"[FLOW] ✅ VEHICLE+FARE: {vehicle_model} ({vehicle}) | {ctx['locked_slots']['fare']} | {distance_km}km", flush=True)
             else:
                 response_text = "Sorry, no vehicles available. Driver will call you."
