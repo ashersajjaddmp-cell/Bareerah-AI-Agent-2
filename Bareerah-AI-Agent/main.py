@@ -1241,9 +1241,7 @@ def has_explicit_correction(text: str, language: str = "en") -> bool:
 
 def get_gather_params(call_sid: str, stt_language: str = None, utterance_num: int = 0) -> dict:
     """
-    ✅ Language-aware gather parameters.
-    - Utterance 1-2: English (phone_call) to establish connection
-    - Utterance 3+: Detected language (Urdu/Arabic) via 'default' (Whisper)
+    ✅ Language-aware gather parameters (SAFE MODE)
     """
     if stt_language is None:
         stt_language = call_contexts.get(call_sid, {}).get("stt_language", "en")
@@ -1255,20 +1253,17 @@ def get_gather_params(call_sid: str, stt_language: str = None, utterance_num: in
         "input": 'speech',
         "speech_timeout": 2,
         "max_speech_time": 30,
-        "timeout": 30,
-        "enhanced": True
+        "timeout": 30
     }
     
-    # ✅ RESTORED SAFE LOGIC to prevent Application Error
-    # English -> phone_call (Fast, Accurate)
-    # Urdu/Arabic -> default (Whisper, supports multilingual)
+    # ✅ SAFE LOGIC: Use 'default' for non-English, 'phone_call' for English
     if stt_language in ["ur", "ar"]:
          params["speech_model"] = "default"
     else:
          params["speech_model"] = "phone_call"
+         params["enhanced"] = True  # Only enhance phone_call
     
-    # ✅ Hints are safe and helpful
-    params["hints"] = "Dubai, Airport, Marina, Mall, Burj Khalifa, downtown, pickup, dropoff, yes, no"
+    # hints removed to prevent errors
     
     return params
 
