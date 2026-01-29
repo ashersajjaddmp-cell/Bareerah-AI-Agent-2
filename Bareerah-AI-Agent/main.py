@@ -1259,11 +1259,15 @@ def get_gather_params(call_sid: str, stt_language: str = None, utterance_num: in
         "enhanced": True
     }
     
-    # ✅ RESTORED: Use 'experimental_conversations' for better accuracy (User Requested State)
-    params["speech_model"] = "experimental_conversations"
-    params["enhanced"] = True
+    # ✅ RESTORED SAFE LOGIC to prevent Application Error
+    # English -> phone_call (Fast, Accurate)
+    # Urdu/Arabic -> default (Whisper, supports multilingual)
+    if stt_language in ["ur", "ar"]:
+         params["speech_model"] = "default"
+    else:
+         params["speech_model"] = "phone_call"
     
-    # ✅ FIX: Add hints to improve recognition of Dubai locations
+    # ✅ Hints are safe and helpful
     params["hints"] = "Dubai, Airport, Marina, Mall, Burj Khalifa, downtown, pickup, dropoff, yes, no"
     
     return params
