@@ -4951,7 +4951,11 @@ def serve_tts(filename):
 # ✅ STARTUP INITIALIZATION (Runs for both Gunicorn and local python main.py)
 def startup_init():
     try:
-        print("[STARTUP] 🚀 Initializing services...", flush=True)
+        # Give Gunicorn a moment to start listening
+        import time
+        time.sleep(1) 
+        
+        print("[STARTUP] 🚀 Initializing services (Background)...", flush=True)
         init_db_pool()
         
         # ✅ INITIALIZE JWT TOKEN
@@ -4972,11 +4976,11 @@ def startup_init():
         print("[STARTUP] ✅ Initialization complete!", flush=True)
     except Exception as e:
         print(f"[STARTUP] ❌ CRITICAL INIT ERROR: {e}", flush=True)
-        # We generally don't want to exit here, as Gunicorn might restart us or we might recover
         pass
 
-# Run initialization immediately when module loads
-startup_init()
+# ✅ RUN INIT ASYNC so Gunicorn starts immediately (prevents Railway timeout)
+print("🚀 App Loaded - Starting init thread...", flush=True)
+threading.Thread(target=startup_init, daemon=True).start()
 
 if __name__ == '__main__':
     print("Starting Bareerah (Professional Booking Assistant) in LOCAL mode...", flush=True)
