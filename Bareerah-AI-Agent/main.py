@@ -4947,7 +4947,6 @@ def serve_tts(filename):
     except:
         return "File not found", 404
 
-if __name__ == '__main__':
 
 # ✅ STARTUP INITIALIZATION (Runs for both Gunicorn and local python main.py)
 def startup_init():
