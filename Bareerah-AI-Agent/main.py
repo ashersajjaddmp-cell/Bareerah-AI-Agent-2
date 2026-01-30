@@ -3494,69 +3494,47 @@ def extract_nlu_clean(text, flow_step, locked_slots, lang="en"):
             "bur dubai": "Bur Dubai", "karama": "Al Karama", "jlt": "Jumeirah Lakes Towers",
         }
         
-        # Map flow_step to response templates (Bareerah speaks as "we" not "I") - MULTILINGUAL
-        step_templates_en = {
-            "dropoff": "Got it! Your dropoff is at {value}. Now, where should we pick you up from?",
-            "pickup": "Perfect! We'll pick you up from {value}. When do you need the ride?",
-            "datetime": "Great! {value}. How many passengers?",
-            "passengers": "Okay, {value} passengers. How many bags?",
-            "luggage": "Got it! {value} bags. Let me find the best vehicle...",
-            "confirm": "Thank you! Your booking is confirmed.",
+        # Map flow_step to context for GPT-4o
+        step_contexts_en = {
+            "dropoff": "We are asking for the destination (dropoff).",
+            "pickup": "We are asking for the starting point (pickup).",
+            "flight_info": "We are asking for flight details (time/number).",
+            "datetime": "We are asking for the pickup time.",
+            "passengers": "We are asking for the number of passengers.",
+            "luggage": "We are asking for the number of bags.",
+            "name": "We are asking for the customer's name.",
+            "notes": "We are asking for any special requests.",
+            "confirm": "We are asking to confirm the booking details.",
         }
-        step_templates_ur = {
-            "dropoff": "Theek hai! Aap ka dropoff {value} pe hai. Ab bataiye, hum aapko kahan se pick karein?",
-            "pickup": "Bilkul! Hum aapko {value} se pick karein ge. Kab chahiye ride?",
-            "datetime": "Theek hai! {value}. Kitne passengers hain?",
-            "passengers": "Acha, {value} passengers. Kitne bags hain?",
-            "luggage": "Theek hai! {value} bags. Best gaari dhundh rahi hoon...",
-            "confirm": "Shukriya! Aapki booking confirm hogayi!",
-        }
-        step_templates_ar = {
-            "dropoff": "Tamam! Nuzulak fi {value}. Min ayna nuqilak?",
-            "pickup": "Mumtaz! Sanaqdumak min {value}. Mata turid alrihla?",
-            "datetime": "Jayid! {value}. Kam rakib?",
-            "passengers": "Hasanan, {value} rakib. Kam haqiba?",
-            "luggage": "Tamam! {value} haqiba. Abhath an afdal sayara...",
-            "confirm": "Shukran! Hajzak muakad!",
-        }
-        # Select templates based on language
-        if lang == "ur":
-            step_templates = step_templates_ur
-        elif lang == "ar":
-            step_templates = step_templates_ar
-        else:
-            step_templates = step_templates_en
+        step_templates = step_contexts_en # Placeholder for backward compat if needed
         
-        step_prompts = {
-            "dropoff": "Customer is telling me WHERE TO DROP THEM OFF. Extract location. High confidence only.",
-            "pickup": "Customer is telling me WHERE TO PICK THEM UP FROM. Extract location. High confidence only.",
-            "datetime": "Customer is telling me WHEN they need the ride. Extract date/time in YYYY-MM-DD HH:MM format.",
-            "passengers": "Customer is telling me HOW MANY PASSENGERS. Extract number only.",
-            "luggage": "Customer is telling me HOW MANY BAGS. Extract number only.",
-            "confirm": "Customer is saying YES or NO to confirm booking. Extract: yes or no",
-        }
-        
-        system = f"""You are Bareerah, professional limo booking assistant. 
-        
-CURRENT STEP: {flow_step}
-TASK: {step_prompts.get(flow_step, 'Extract booking info')}
+        system = f"""You are Bareerah, a human-like, professional limousine booking assistant for Star Skyline Limousine. 
+You are talking to a customer via voice. 
 
-Return ONLY valid JSON:
+CURRENT BOOKING DATA: {locked_slots}
+CURRENT FOCUS: {flow_step}
+
+TASK:
+1. Extract any mentioned info from the input: [dropoff, pickup, datetime, passengers, luggage, name].
+2. Generate a natural, polite, and human-like response in {lang}. 
+3. If information is missing, ask for it naturally. 
+4. If the user provided multiple pieces of info at once (e.g. "To Airport from Marina Mall"), extract both and acknowledge them.
+5. Do NOT say "Dropoff at {flow_step}" if they are giving a pickup. Be smart about context.
+6. Acknowledge what they just said before asking for the next missing piece.
+
+Return ONLY this JSON:
 {{
-  "extracted_value": "the extracted value or empty string",
+  "extracted_slots": {{ "slot_name": "value" }},
   "confidence": 0.0-1.0,
-  "response": "your short reply to CURRENT step only (<20 words)",
-  "next_step": "{flow_step}"
+  "response": "your natural conversational response",
+  "next_step": "the next missing slot (dropoff, pickup, datetime, passengers, luggage, or name)"
 }}
 
 RULES:
-- Confidence >= 0.7: Confirm extraction, DO NOT ask for next step
-- Confidence < 0.7: Ask customer to repeat SAME step
-- For dropoff/pickup: Match to Dubai locations (airport, marina mall, burj khalifa, etc.)
-- For datetime: Parse relative dates using TODAY'S DATE = {today_dubai} (Dubai timezone). Example: 'tomorrow 4pm' → next day at 16:00, 'kal' means tomorrow
-- For passengers/luggage: Extract number only
-- RESPONSE should ONLY address current step - never ask for next step
-- ALWAYS return valid JSON"""
+- For locations: extract clean names (e.g. "Dubai Mall").
+- For datetime: Parse relative dates using TODAY = {today_dubai} (Dubai Time). 
+- If the customer asks a question, answer it and then guide them back to booking.
+ALWAYS return valid JSON."""
 
         user = f'Customer said: "{text}"\n\nExtract and respond.'
         
@@ -3572,62 +3550,39 @@ RULES:
         )
         
         result = json.loads(resp.choices[0].message.content)
-        extracted = result.get('extracted_value', '').strip()
+        extracted_slots = result.get('extracted_slots', {})
+        # For backward compatibility with the rest of the script:
+        extracted = extracted_slots.get(flow_step) or result.get('extracted_value', '').strip()
         confidence = result.get('confidence', 0)
+        response = result.get('response', 'Got it.')
+        next_step = result.get('next_step', flow_step)
         
-        # ✅ SMART LOCATION MATCHING (Word-based, not substring)
-        if flow_step in ["dropoff", "pickup"] and (not extracted or confidence < 0.7):
+        # ✅ SMART LOCATION FALLBACK (If LLM extracted nothing or low confidence)
+        if flow_step in ["dropoff", "pickup"] and not extracted:
+            # (Keeping the word-match logic for safety)
             text_lower = text.lower()
             text_words = set(w for w in text_lower.split() if len(w) > 2)
-            
-            best_match = None
-            best_score = 0
             best_value = None
-            
-            # Score ALL matches and pick best (not first)
-            for key, value in POPULAR_DUBAI_LOCATIONS.items():
-                key_words = set(w for w in key.split() if len(w) > 2)
-                
-                # Skip if no word overlap
-                if not (text_words & key_words):
-                    continue
-                
-                # Calculate match score: prefer complete key match + word overlap
-                overlap = len(text_words & key_words)
-                key_length = len(key_words)
-                total_words = len(text_words)
-                
-                # Score: 100% if all key words in text, weighted by overlap
-                if key_words.issubset(text_words):  # All key words found in text
-                    match_score = 1.0 + (overlap / (total_words + 0.1))  # Bonus for exact
-                else:
-                    match_score = overlap / (total_words + 0.1)  # Partial match
-                
-                # Update best match
-                if match_score > best_score:
-                    best_score = match_score
-                    best_match = key
-                    best_value = value
-            
-            # Use best match if found
-            if best_match and best_score > 0.4:
+            best_score = 0
+            for key, val in POPULAR_DUBAI_LOCATIONS.items():
+                kw = set(w for w in key.split() if len(w) > 2)
+                if text_words & kw:
+                    score = len(text_words & kw) / (len(text_words) + 0.1)
+                    if score > best_score:
+                        best_score = score
+                        best_value = val
+            if best_value and best_score > 0.4:
                 extracted = best_value
-                confidence = min(0.95, 0.7 + (best_score * 0.2))
-                print(f"[FALLBACK] ✅ Word-Match: '{best_match}' → {best_value} (score: {best_score:.2f})", flush=True)
+                extracted_slots[flow_step] = extracted
+                confidence = 0.9
         
-        # ✅ Use pre-defined responses instead of GPT-4o responses
-        template = step_templates.get(flow_step, "Got it!")
-        if extracted and confidence >= 0.7:
-            response = template.replace("{value}", extracted)
-        else:
-            response = f"Can you please repeat? I need to confirm the {flow_step} location." if flow_step in ["dropoff", "pickup"] else f"Could you repeat that {flow_step}?"
-        
-        print(f"[NLU] ✅ {flow_step} | conf={confidence:.1f} | value={extracted[:30] if extracted else '(empty)'}", flush=True)
+        print(f"[NLU] extracted={extracted_slots} | next={next_step} | response='{response[:50]}...'", flush=True)
         return {
+            "extracted_slots": extracted_slots,
             "extracted_value": extracted,
             "confidence": confidence,
             "response": response,
-            "next_step": flow_step
+            "next_step": next_step
         }
         
     except Exception as e:
@@ -4026,65 +3981,56 @@ def handle_call():
         # Get current language for multilingual responses
         current_lang = ctx.get("language", "en")
         
+        # ✅ UNIFIED BRAIN CALL: Multi-slot extraction + natural response
+        nlu = extract_nlu_clean(speech, ctx["flow_step"], ctx["locked_slots"], current_lang)
+        
+        # ✅ MULTI-EXTRACTION: Save all identified slots immediately
+        if nlu.get("extracted_slots"):
+            for slot, val in nlu["extracted_slots"].items():
+                if val and not ctx["locked_slots"].get(slot):
+                    # Special validation for locations if needed
+                    ctx["locked_slots"][slot] = val
+                    print(f"[BRAIN] ✅ Auto-saved {slot}: {val}", flush=True)
+
+        # ✅ FIXED: Transition to next step suggested by Brain if current step is filled
+        if ctx["flow_step"] in nlu.get("extracted_slots", {}) or nlu.get("next_step") != ctx["flow_step"]:
+            if nlu.get("next_step") and nlu["next_step"] != ctx["flow_step"]:
+                print(f"[BRAIN] ⏩ Transition: {ctx['flow_step']} -> {nlu['next_step']}", flush=True)
+                ctx["flow_step"] = nlu["next_step"]
+
+        response_text = nlu.get("response", "")
+        
         # ✅ STEP 1: ASK FOR DROPOFF (destination)
         if ctx["flow_step"] == "dropoff":
-            nlu = extract_nlu_clean(speech, "dropoff", {}, current_lang)
             if nlu.get("confidence", 0) >= 0.7:
-                dropoff_location = nlu.get("extracted_value", "")
+                dropoff_location = ctx["locked_slots"].get("dropoff", nlu.get("extracted_value", ""))
                 ctx["locked_slots"]["dropoff"] = dropoff_location
                 
                 # ✅ CHECK IF AIRPORT - if yes, ask for flight info
                 if is_airport_location(dropoff_location):
                     ctx["flow_step"] = "flight_info"
-                    ctx["locked_slots"]["flight_type"] = "departure"  # ✅ FIX: Store in locked_slots for DB persistence
+                    ctx["locked_slots"]["flight_type"] = "departure"
                     print(f"[FLOW] ✅ AIRPORT DETECTED IN DROPOFF: {dropoff_location}", flush=True)
-                    if current_lang == "ur":
-                        response_text = "Theek! Aapko airport jana hai. Kya aapka flight departure hua ya arrival? Aur flight ka time bataye?"
-                    elif current_lang == "ar":
-                        response_text = "Tamam! Antum mutajihoon ilal matar. Hal alrahlah iqlaah aw wusul? Wa aw alyoqatu?"
-                    else:
-                        response_text = "Great! You're going to the airport. Is your flight departing or arriving? And what time?"
                 else:
                     ctx["flow_step"] = "pickup"
-                    if current_lang == "ur":
-                        response_text = f"Theek hai! {dropoff_location} pe dropoff. Ab bataiye, kahan se pick karein?"
-                    elif current_lang == "ar":
-                        response_text = f"Tamam! Dropoff bi {dropoff_location}. Wa kaina intiqalu?"
-                    else:
-                        response_text = f"Perfect! Dropoff at {dropoff_location}. Where are you starting from?"
                 print(f"[FLOW] ✅ DROPOFF LOCKED: {dropoff_location}", flush=True)
-            else:
-                print(f"[FLOW] ⚠️ LOW CONF ({nlu.get('confidence', 0):.1f}): Ask repeat", flush=True)
-            response_text = nlu.get("response", "Sorry, say again?")
+            if not response_text: response_text = nlu.get("response", "Where you heading?")
         
         # ✅ STEP 2: ASK FOR PICKUP (from where)
         elif ctx["flow_step"] == "pickup":
-            nlu = extract_nlu_clean(speech, "pickup", ctx["locked_slots"], current_lang)
             if nlu.get("confidence", 0) >= 0.7:
-                pickup_location = nlu.get("extracted_value", "")
+                pickup_location = ctx["locked_slots"].get("pickup", nlu.get("extracted_value", ""))
                 ctx["locked_slots"]["pickup"] = pickup_location
                 
                 # ✅ CHECK IF AIRPORT - if yes, ask for flight info
                 if is_airport_location(pickup_location):
                     ctx["flow_step"] = "flight_info"
-                    ctx["locked_slots"]["flight_type"] = "arrival"  # ✅ FIX: Store in locked_slots for DB persistence
+                    ctx["locked_slots"]["flight_type"] = "arrival"
                     print(f"[FLOW] ✅ AIRPORT DETECTED IN PICKUP: {pickup_location}", flush=True)
-                    if current_lang == "ur":
-                        response_text = "Theek! Aap airport se aa rahe ho. Flight ka arrival time bataye?"
-                    elif current_lang == "ar":
-                        response_text = "Tamam! Antum qadimoon min almatar. Aw waqtu wusul alrahlah?"
-                    else:
-                        response_text = "Got it! You're coming from the airport. What time is your flight arriving?"
                 else:
                     ctx["flow_step"] = "datetime"
-                    if current_lang == "ur":
-                        response_text = f"Bilkul! {pickup_location} se pick karein. Kab chahiye ride?"
-                    elif current_lang == "ar":
-                        response_text = f"Tabaan! Intiqalu min {pickup_location}. Ayana turid?"
-                    else:
-                        response_text = f"Sure! Picking you from {pickup_location}. When do you need the ride?"
                 print(f"[FLOW] ✅ PICKUP LOCKED: {pickup_location}", flush=True)
-            response_text = nlu.get("response", "Sorry, say again?")
+            if not response_text: response_text = nlu.get("response", "Where pick up from?")
         
         # ✅ STEP 2.5: ASK FOR FLIGHT INFO (if airport detected)
         elif ctx["flow_step"] == "flight_info":
@@ -4161,213 +4107,61 @@ def handle_call():
         
         # ✅ STEP 3: ASK FOR DATETIME
         elif ctx["flow_step"] == "datetime":
-            nlu = extract_nlu_clean(speech, "datetime", ctx["locked_slots"], current_lang)
             if nlu.get("confidence", 0) >= 0.7:
                 raw_dt = nlu.get("extracted_value", "")
                 
-                # ✅ DUBAI TIMEZONE FIX: Convert to Dubai time (UTC+4) for backend
+                # ✅ DUBAI TIMEZONE FIX
                 try:
                     from datetime import datetime as dt, timezone, timedelta
-                    dubai_tz = timezone(timedelta(hours=4))  # UTC+4
-                    
-                    # Parse the raw datetime (GPT returns in server timezone)
+                    dubai_tz = timezone(timedelta(hours=4))
                     parsed = dt.strptime(raw_dt, "%Y-%m-%d %H:%M")
-                    
-                    # Get current Dubai time for comparison
                     now_utc = dt.now(timezone.utc)
                     now_dubai = now_utc.astimezone(dubai_tz)
-                    
-                    # If customer said "4 PM", assume they mean Dubai time, so we store as-is
-                    # The datetime is already in customer's intended time (Dubai local)
                     dubai_dt = parsed.replace(tzinfo=dubai_tz)
-                    
-                    # Format for backend: ISO format with Dubai date
                     formatted_dt = dubai_dt.strftime("%Y-%m-%d %H:%M")
-                    
-                    print(f"[DATETIME] ✅ Customer said: {raw_dt} → Dubai time: {formatted_dt}", flush=True)
                     
                     ctx["locked_slots"]["datetime"] = formatted_dt
                     
-                    # ✅ FIX: Use DUBAI datetime for all comparisons (not naive parsed)
                     today_dubai = now_dubai.date()
-                    dubai_date = dubai_dt.date()  # Use tz-aware date
+                    dubai_date = dubai_dt.date()
                     days_diff = (dubai_date - today_dubai).days
                     
-                    # ✅ REJECT PAST TIMES (yesterday or earlier)
                     if days_diff < 0:
-                        print(f"[DATETIME] ❌ REJECTED: Customer said past time ({day_word} {dubai_date}), asking for future time", flush=True)
-                        ctx["flow_step"] = "datetime"  # Stay in datetime step
-                        if current_lang == "ur":
-                            response_text = "Zarurat hai aaj ya kal ka time. Kab chahiye?"
-                        elif current_lang == "ar":
-                            response_text = "Lazim alyoum aw ghada. Ayna wa aian?"
-                        else:
-                            response_text = "I need today or tomorrow. When would you like the ride?"
-                        natural_dt = None
+                        ctx["flow_step"] = "datetime"
+                        if not response_text: response_text = "I'm sorry, I need a time in the future. When would you like the ride?"
                     else:
-                        # ✅ Future time is valid
-                        if days_diff == 0:
-                            day_word = "today"
-                        elif days_diff == 1:
-                            day_word = "tomorrow"
-                        else:
-                            day_word = dubai_dt.strftime("%B %d")
-                        
-                        # Use dubai_dt for time formatting too
-                        time_12h = dubai_dt.strftime("%I:%M %p").lstrip("0")
-                        natural_dt = f"{day_word} at {time_12h}"
-                        ctx["locked_slots"]["datetime"] = formatted_dt
                         ctx["flow_step"] = "passengers"
-                        print(f"[DATETIME] ✅ ACCEPTED: {day_word} {time_12h}", flush=True)
-                        
-                        if current_lang == "ur":
-                            response_text = f"Theek hai! {day_word} {time_12h} pe. Kitne passengers hain?"
-                        elif current_lang == "ar":
-                            response_text = f"Tamam! {day_word} {time_12h}. Kam safari?"
-                        else:
-                            response_text = f"Perfect! {day_word} at {time_12h}. How many passengers?"
-                    
-                    if natural_dt:
-                        print(f"[DATETIME] 📅 Dubai now: {now_dubai.strftime('%Y-%m-%d %H:%M')}, Requested: {dubai_dt.strftime('%Y-%m-%d %H:%M')} ({day_word})", flush=True)
+                        print(f"[DATETIME] ✅ ACCEPTED: {formatted_dt}", flush=True)
                 except Exception as e:
-                    print(f"[DATETIME] ⚠️ Parse error: {e}, using raw: {raw_dt}", flush=True)
-                    ctx["locked_slots"]["datetime"] = raw_dt
-                    natural_dt = raw_dt
-                
-                ctx["flow_step"] = "passengers"
-                print(f"[FLOW] ✅ DATETIME LOCKED: {ctx['locked_slots']['datetime']}", flush=True)
-                if current_lang == "ur":
-                    response_text = f"Theek hai! {natural_dt}. Kitne passengers hain?"
-                elif current_lang == "ar":
-                    response_text = f"Jayid! {natural_dt}. Kam rakib?"
-                else:
-                    response_text = f"Great! {natural_dt}. How many passengers?"
-            else:
-                if current_lang == "ur":
-                    response_text = nlu.get("response", "Ride kab chahiye?")
-                elif current_lang == "ar":
-                    response_text = nlu.get("response", "Mata turid alrihla?")
-                else:
-                    response_text = nlu.get("response", "When do you need the ride?")
+                    print(f"[DATETIME] ⚠️ Parse error: {e}", flush=True)
+            
+            if not response_text: response_text = nlu.get("response", "When would you like the ride?")
         
         # ✅ STEP 4: ASK FOR PASSENGERS
         elif ctx["flow_step"] == "passengers":
-            nlu = extract_nlu_clean(speech, "passengers", ctx["locked_slots"], current_lang)
             if nlu.get("confidence", 0) >= 0.7:
-                ctx["locked_slots"]["passengers"] = int(nlu.get("extracted_value", "1"))
+                ctx["locked_slots"]["passengers"] = int(nlu.get("extracted_slots", {}).get("passengers") or nlu.get("extracted_value", "1"))
                 ctx["flow_step"] = "luggage"
-                print(f"[FLOW] ✅ PASSENGERS LOCKED: {nlu.get('extracted_value')}", flush=True)
-            response_text = nlu.get("response", "Sorry, say again?")
-        
+                print(f"[FLOW] ✅ PASSENGERS LOCKED: {ctx['locked_slots']['passengers']}", flush=True)
+            if not response_text: response_text = nlu.get("response", "How many passengers?")
+
         # ✅ STEP 5: ASK FOR LUGGAGE
         elif ctx["flow_step"] == "luggage":
-            nlu = extract_nlu_clean(speech, "luggage", ctx["locked_slots"], current_lang)
             if nlu.get("confidence", 0) >= 0.7:
-                ctx["locked_slots"]["luggage"] = int(nlu.get("extracted_value", "0"))
-                ctx["flow_step"] = "name"  # ✅ ASK FOR CUSTOMER NAME
-                print(f"[FLOW] ✅ LUGGAGE LOCKED: {nlu.get('extracted_value')}", flush=True)
-                if current_lang == "ur":
-                    response_text = "Aur aapka naam kya hai please?"
-                elif current_lang == "ar":
-                    response_text = "Wa ma ismuk min fadlik?"
-                else:
-                    response_text = "And what's your name please?"
-            else:
-                if current_lang == "ur":
-                    response_text = nlu.get("response", "Kitne bags hongay?")
-                elif current_lang == "ar":
-                    response_text = nlu.get("response", "Kam haqiba?")
-                else:
-                    response_text = nlu.get("response", "How many bags will you have?")
-        
-        # ✅ STEP 5.5: ASK FOR CUSTOMER NAME (important for driver to call)
+                ctx["locked_slots"]["luggage"] = int(nlu.get("extracted_slots", {}).get("luggage") or nlu.get("extracted_value", "0"))
+                ctx["flow_step"] = "name"
+                print(f"[FLOW] ✅ LUGGAGE LOCKED: {ctx['locked_slots']['luggage']}", flush=True)
+            if not response_text: response_text = nlu.get("response", "How many bags?")
+
+        # ✅ STEP 5.5: ASK FOR CUSTOMER NAME
         elif ctx["flow_step"] == "name":
-            name_input = speech.strip()
-            
-            # ✅ Remove common phrases before name
-            name_lower = name_input.lower()
-            prefixes_to_remove = [
-                "my name is ", "i am ", "this is ", "it's ", "its ",
-                "mera naam ", "mera nam ", "naam hai ", "name is ",
-                "call me ", "you can call me ", "i'm "
-            ]
-            for prefix in prefixes_to_remove:
-                if name_lower.startswith(prefix):
-                    name_input = name_input[len(prefix):].strip()
-                    break
-            
-            # ✅ Remove trailing fillers
-            suffixes_to_remove = [" help", " please", " ji", " sahab", " sir", " bhai"]
-            for suffix in suffixes_to_remove:
-                if name_input.lower().endswith(suffix):
-                    name_input = name_input[:-len(suffix)].strip()
-            
-            words = name_input.split()
-            
-            # ✅ Track name attempts for retry logic
-            if "name_attempts" not in ctx:
-                ctx["name_attempts"] = 0
-            ctx["name_attempts"] += 1
-            
-            # ✅ Helper: Check if name looks valid (not just noise/random speech)
-            def is_valid_name(name):
-                if not name or len(name) < 2:
-                    return False
-                # Invalid if contains too many numbers or special characters
-                if sum(c.isdigit() for c in name) > 2:
-                    return False
-                # Invalid if looks like a sentence (too many common words)
-                noise_words = {"is", "my", "the", "a", "want", "need", "please", "help", "go", "take", "mujhe", "jana", "hai", "chahiye"}
-                name_words = set(name.lower().split())
-                if len(name_words & noise_words) >= 2:
-                    return False
-                return True
-            
-            # ✅ After 2 failed attempts, accept whatever we have
-            if ctx["name_attempts"] >= 2 and len(words) >= 1:
-                extracted_name = " ".join(words[:3]).title()  # Take up to 3 words
-                # ✅ Store ORIGINAL name (not transliterated)
-                ctx["locked_slots"]["customer_name"] = extracted_name
-                # ✅ Only transliterate for console logging
-                extracted_name_log = transliterate_hindi_to_roman(extracted_name)
-                ctx["flow_step"] = "notes"
-                # ✅ FIX: Don't repeat name if it looks invalid - just say "Sir"
-                if is_valid_name(extracted_name):
-                    response_text = f"Got it {extracted_name}! Any special notes? Say skip if none."
-                else:
-                    response_text = "Got it Sir! Any special notes? Say skip if none."
-                print(f"[FLOW] ✅ CUSTOMER NAME (attempt {ctx['name_attempts']}): {extracted_name_log}", flush=True)
-            elif len(words) == 1:
-                # Single word - accept
-                extracted_name = words[0].title()
-                # ✅ Store ORIGINAL name (not transliterated)
-                ctx["locked_slots"]["customer_name"] = extracted_name
-                # ✅ Only transliterate for console logging
-                extracted_name_log = transliterate_hindi_to_roman(extracted_name)
-                ctx["flow_step"] = "notes"
-                # ✅ FIX: Don't repeat name if it looks invalid - just say "Sir"
-                if is_valid_name(extracted_name):
-                    response_text = f"Thanks {extracted_name}! Any special notes? Say skip if none."
-                else:
-                    response_text = "Thanks Sir! Any special notes? Say skip if none."
-                print(f"[FLOW] ✅ CUSTOMER NAME: {extracted_name_log}", flush=True)
-            elif 2 <= len(words) <= 3:
-                # 2-3 words - assume name (e.g., "John Smith", "Rameez Ul Haq")
-                extracted_name = " ".join(words).title()
-                # ✅ Store ORIGINAL name (not transliterated)
-                ctx["locked_slots"]["customer_name"] = extracted_name
-                # ✅ Only transliterate for console logging
-                extracted_name_log = transliterate_hindi_to_roman(extracted_name)
-                ctx["flow_step"] = "notes"
-                # ✅ FIX: Don't repeat name if it looks invalid - just say "Sir"
-                if is_valid_name(extracted_name):
-                    response_text = f"Perfect {extracted_name}! Any special notes? Say skip if none."
-                else:
-                    response_text = "Perfect Sir! Any special notes? Say skip if none."
-                print(f"[FLOW] ✅ CUSTOMER NAME: {extracted_name_log}", flush=True)
-            else:
-                # More than 3 words - ask to repeat (clearer instruction)
-                response_text = "Sorry, I didn't catch that clearly. Please say just your name."
+            if nlu.get("confidence", 0) >= 0.7:
+                name = nlu.get("extracted_slots", {}).get("name") or nlu.get("extracted_value", "")
+                if name:
+                    ctx["locked_slots"]["customer_name"] = name.title()
+                    ctx["flow_step"] = "notes"
+                    print(f"[FLOW] ✅ NAME LOCKED: {name}", flush=True)
+            if not response_text: response_text = nlu.get("response", "What is your name?")
         
         # ✅ STEP 6: ASK FOR NOTES (waiting time, special requests) → AUTO-RUN VEHICLE
         elif ctx["flow_step"] == "notes":
