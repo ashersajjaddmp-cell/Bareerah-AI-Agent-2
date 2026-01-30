@@ -3980,6 +3980,8 @@ def handle_call():
         # Also keep in-memory for call-status handler
         call_contexts[call_sid] = ctx
         
+        # Get current language for brain
+        current_lang = ctx.get("language", "en")
         response_text = ""
         
         # ✅ UNIFIED BRAIN CALL
@@ -3989,15 +3991,13 @@ def handle_call():
         if nlu.get("extracted_slots"):
             for slot, val in nlu["extracted_slots"].items():
                 if val:
-                    # Logic to prevent overwriting unless it's a correction
                     ctx["locked_slots"][slot] = val
                     print(f"[BRAIN] ✅ Extracted {slot}: {val}", flush=True)
 
-        # ✅ STATE GUARD: Determine the actual next step based on what's missing
-        all_steps = ["dropoff", "pickup", "datetime", "passengers", "luggage", "name"]
+        # ✅ STATE GUARD: Determine the actual next step
+        all_steps = ["dropoff", "pickup", "datetime", "passengers", "luggage", "name", "notes"]
         suggested_next = nlu.get("next_step", ctx["flow_step"])
         
-        # If Brain suggests something we already have, find the first truly missing field
         if suggested_next in ctx["locked_slots"] and ctx["locked_slots"].get(suggested_next):
             for step in all_steps:
                 if not ctx["locked_slots"].get(step):
@@ -4008,24 +4008,27 @@ def handle_call():
         else:
             ctx["flow_step"] = suggested_next
 
-        # If airport detected, override to flight_info
+        # If airport, override to flight_info
         for loc_slot in ["pickup", "dropoff"]:
-            loc_val = ctx["locked_slots"].get(loc_slot)
-            if loc_val and is_airport_location(loc_val) and not ctx["locked_slots"].get("flight_time"):
+            lv = ctx["locked_slots"].get(loc_slot)
+            if lv and is_airport_location(lv) and not ctx["locked_slots"].get("flight_time"):
                 ctx["flow_step"] = "flight_info"
                 ctx["locked_slots"]["flight_type"] = "arrival" if loc_slot == "pickup" else "departure"
 
         response_text = nlu.get("response", "Could you repeat that?")
+
+        # ✅ FUNCTIONAL LOGIC CHAIN (prevents hitting the final 'else')
+        if ctx["flow_step"] in ["dropoff", "pickup", "name", "notes", "vehicle"]:
+             pass # Use response_text from Brain
+
         
         # ✅ SKIP OLD REDUNDANT STEPS - Just use Brain's response
         # We only keep the specific logic for time parsing and booking creation
-        if ctx["flow_step"] == "datetime" and "datetime" in nlu.get("extracted_slots", {}):
-            pass # Use EXISTING time parsing logic below
-        elif ctx["flow_step"] == "confirm":
-            pass # Use EXISTING confirm logic below
+        elif ctx["flow_step"] == "datetime" and "datetime" in nlu.get("extracted_slots", {}):
+            pass # See existing datetime block below
         
-        # Proceed with specific functional logic (Time parsing, Confirm, etc.)
-        # but DON'T overwrite response_text if it came from the Brain.
+        elif ctx["flow_step"] == "confirm":
+            pass # See existing confirm block below
 
         
         # ✅ STEP 2.5: ASK FOR FLIGHT INFO (if airport detected)
