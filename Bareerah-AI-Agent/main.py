@@ -38,6 +38,7 @@ from email.mime.multipart import MIMEMultipart
 from bareerah_qa_cache import BAREERAH_QA_CACHE, FUZZY_MAPPING  # ✅ Import Q&A cache
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'bareerah-secret-key')
+print("🚀 BAREERAH AI AGENT STARTING UP... (Verification Push)", flush=True)
 
 OPENAI_CLIENT = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
