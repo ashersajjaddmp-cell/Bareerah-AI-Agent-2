@@ -4948,21 +4948,37 @@ def serve_tts(filename):
         return "File not found", 404
 
 if __name__ == '__main__':
-    init_db_pool()
-    
-    # ✅ INITIALIZE JWT TOKEN ON SERVER STARTUP
-    print("[AUTH] Server starting - initializing JWT token...", flush=True)
-    initial_token = get_jwt_token()
-    if initial_token:
-        print(f"[AUTH] ✅ Server JWT token initialized successfully", flush=True)
-        # ✅ FETCH FARE RATES FROM BACKEND ON STARTUP
-        fare_rates_manager.fetch_from_backend(initial_token)
-    else:
-        print(f"[AUTH] ⚠️ JWT token initialization failed - will retry on first request", flush=True)
-    
-    # ✅ TEST BACKEND CONNECTION ON STARTUP
-    test_backend_connection()
-    
-    threading.Thread(target=prewarm_elevenlabs_tts, daemon=True).start()
-    print("Starting Bareerah (Professional Booking Assistant)...", flush=True)
+
+# ✅ STARTUP INITIALIZATION (Runs for both Gunicorn and local python main.py)
+def startup_init():
+    try:
+        print("[STARTUP] 🚀 Initializing services...", flush=True)
+        init_db_pool()
+        
+        # ✅ INITIALIZE JWT TOKEN
+        print("[AUTH] Initializing JWT token...", flush=True)
+        initial_token = get_jwt_token()
+        if initial_token:
+            print(f"[AUTH] ✅ Server JWT token initialized successfully", flush=True)
+            # ✅ FETCH FARE RATES
+            fare_rates_manager.fetch_from_backend(initial_token)
+        else:
+            print(f"[AUTH] ⚠️ JWT token initialization failed - will retry on first request", flush=True)
+        
+        # ✅ TEST BACKEND CONNECTION
+        test_backend_connection()
+        
+        # ✅ PREWARM TTS
+        threading.Thread(target=prewarm_elevenlabs_tts, daemon=True).start()
+        print("[STARTUP] ✅ Initialization complete!", flush=True)
+    except Exception as e:
+        print(f"[STARTUP] ❌ CRITICAL INIT ERROR: {e}", flush=True)
+        # We generally don't want to exit here, as Gunicorn might restart us or we might recover
+        pass
+
+# Run initialization immediately when module loads
+startup_init()
+
+if __name__ == '__main__':
+    print("Starting Bareerah (Professional Booking Assistant) in LOCAL mode...", flush=True)
     app.run(host='0.0.0.0', port=5000, debug=False)
