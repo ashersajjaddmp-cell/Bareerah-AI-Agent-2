@@ -3557,12 +3557,19 @@ ALWAYS return valid JSON."""
         )
         
         result = json.loads(resp.choices[0].message.content)
-        extracted_slots = result.get('extracted_slots', {})
-        # For backward compatibility with the rest of the script:
-        extracted = extracted_slots.get(flow_step) or result.get('extracted_value', '').strip()
-        confidence = result.get('confidence', 0)
-        response = result.get('response', 'Got it.')
-        next_step = result.get('next_step', flow_step)
+        extracted_slots = result.get('extracted_slots') or {}
+        # For backward compatibility with the rest of the script: cast to str to avoid .strip() crashes
+        res_val = extracted_slots.get(flow_step) or result.get('extracted_value') or ""
+        extracted = str(res_val).strip()
+        
+        # Safe casting for confidence
+        try:
+            confidence = float(result.get('confidence', 0.9))
+        except:
+            confidence = 0.9
+            
+        response = str(result.get('response') or result.get('reply') or 'Got it.')
+        next_step = str(result.get('next_step') or result.get('step') or flow_step).strip()
         
         # ✅ SMART LOCATION FALLBACK (If LLM extracted nothing or low confidence)
         if flow_step in ["dropoff", "pickup"] and not extracted:
@@ -3997,8 +4004,22 @@ def handle_call():
                     ctx["locked_slots"][slot] = val
                     print(f"[BRAIN] ✅ Extracted {slot}: {val}", flush=True)
 
-        # ✅ NO LOOP GUARD: Trust the Brain's response/next_step choice 
-        ctx["flow_step"] = nlu.get("next_step", ctx["flow_step"])
+        # ✅ NO LOOP GUARD: Move to Brain's suggested step (with fallback)
+        brain_next = nlu.get("next_step")
+        if brain_next and brain_next != "null":
+            ctx["flow_step"] = brain_next
+        
+        # ✅ ANTI-LOOP: If current step is already filled, force move to next missing one
+        all_ordered_steps = ["dropoff", "pickup", "datetime", "passengers", "luggage", "name", "notes"]
+        current_val = ctx["locked_slots"].get(ctx["flow_step"])
+        if current_val and str(current_val).strip():
+            for s in all_ordered_steps:
+                if not ctx["locked_slots"].get(s):
+                    ctx["flow_step"] = s
+                    break
+            else:
+                ctx["flow_step"] = "confirm"
+
         response_text = nlu.get("response", "Could you repeat that?")
 
         # ✅ Check for airport specifically
