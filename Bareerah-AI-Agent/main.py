@@ -3515,27 +3515,24 @@ def extract_nlu_clean(text, flow_step, locked_slots, lang="en"):
         system = f"""You are Bareerah, a human-like, professional limousine booking assistant for Star Skyline Limousine. 
 You are talking to a customer via voice. 
 
-CURRENT BOOKING PROGRESS:
+BOOKING STATUS (ALREADY CONFIRMED):
 {known_str}
 
-TASKS:
-1. EXTRACT: Find any booking data in the user's speech: [dropoff, pickup, datetime, passengers, luggage, name].
-2. RESPOND: Acknowledge what they said, then ask for the FIRST missing piece of info from the list above. 
-3. NEXT STEP: Identify which missing field you are asking for in your response.
+CURRENT FOCUS: {flow_step}
 
-IMPORTANT: 
-- DO NOT ask questions for information already listed in 'CURRENT BOOKING PROGRESS'.
-- If they just gave you the dropoff, your response MUST ask for the pickup (or next missing field).
-- Keep responses short (under 15 words) and natural.
+TASK:
+1. Extract any mentioned info from: [dropoff, pickup, datetime, passengers, luggage, name].
+2. Generate a natural, polite response in {lang}. Acknowledge what they just said before asking for the next missing piece.
+3. IMPORTANT: DO NOT ask for anything listed in the BOOKING STATUS above.
+4. Suggest the next MISSING field as 'next_step'.
 
 Return ONLY this JSON:
 {{
   "extracted_slots": {{ "slot_name": "value" }},
-  "extracted_value": "primary value for the current focus",
-  "confidence": 0.9,
-  "response": "Your natural response acknowledging input and asking for the NEXT thing",
-  "next_step": "the field you are asking for now"
-}}"""
+  "confidence": 0.0-1.0,
+  "response": "your natural conversational response",
+  "next_step": "the next missing slot ONLY"
+}}
 
 RULES:
 - If user provides info already confirmed, just acknowledge it.
@@ -3546,30 +3543,23 @@ ALWAYS return valid JSON."""
         user = f'Customer said: "{text}"\n\nExtract and respond.'
         
         resp = OPENAI_CLIENT.chat.completions.create(
-            model="gpt-4o-mini",  # ✅ MUCH FASTER FOR VOICE
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user}
             ],
             response_format={"type": "json_object"},
-            max_tokens=150,
-            timeout=3
+            max_tokens=200,
+            timeout=5
         )
         
         result = json.loads(resp.choices[0].message.content)
-        extracted_slots = result.get('extracted_slots') or {}
-        # For backward compatibility with the rest of the script: cast to str to avoid .strip() crashes
-        res_val = extracted_slots.get(flow_step) or result.get('extracted_value') or ""
-        extracted = str(res_val).strip()
-        
-        # Safe casting for confidence
-        try:
-            confidence = float(result.get('confidence', 0.9))
-        except:
-            confidence = 0.9
-            
-        response = str(result.get('response') or result.get('reply') or 'Got it.')
-        next_step = str(result.get('next_step') or result.get('step') or flow_step).strip()
+        extracted_slots = result.get('extracted_slots', {})
+        # For backward compatibility with the rest of the script:
+        extracted = extracted_slots.get(flow_step) or result.get('extracted_value', '').strip()
+        confidence = result.get('confidence', 0)
+        response = result.get('response', 'Got it.')
+        next_step = result.get('next_step', flow_step)
         
         # ✅ SMART LOCATION FALLBACK (If LLM extracted nothing or low confidence)
         if flow_step in ["dropoff", "pickup"] and not extracted:
@@ -4004,41 +3994,39 @@ def handle_call():
                     ctx["locked_slots"][slot] = val
                     print(f"[BRAIN] ✅ Extracted {slot}: {val}", flush=True)
 
-        # ✅ NO LOOP GUARD: Move to Brain's suggested step (with fallback)
-        brain_next = nlu.get("next_step")
-        if brain_next and brain_next != "null":
-            ctx["flow_step"] = brain_next
+        # ✅ STATE GUARD: Determine the actual next step
+        all_steps = ["dropoff", "pickup", "datetime", "passengers", "luggage", "name", "notes"]
+        suggested_next = nlu.get("next_step", ctx["flow_step"])
         
-        # ✅ ANTI-LOOP: If current step is already filled, force move to next missing one
-        all_ordered_steps = ["dropoff", "pickup", "datetime", "passengers", "luggage", "name", "notes"]
-        current_val = ctx["locked_slots"].get(ctx["flow_step"])
-        if current_val and str(current_val).strip():
-            for s in all_ordered_steps:
-                if not ctx["locked_slots"].get(s):
-                    ctx["flow_step"] = s
+        if suggested_next in ctx["locked_slots"] and ctx["locked_slots"].get(suggested_next):
+            for step in all_steps:
+                if not ctx["locked_slots"].get(step):
+                    ctx["flow_step"] = step
                     break
             else:
                 ctx["flow_step"] = "confirm"
+        else:
+            ctx["flow_step"] = suggested_next
 
-        response_text = nlu.get("response", "Could you repeat that?")
-
-        # ✅ Check for airport specifically
+        # If airport, override to flight_info
         for loc_slot in ["pickup", "dropoff"]:
             lv = ctx["locked_slots"].get(loc_slot)
             if lv and is_airport_location(lv) and not ctx["locked_slots"].get("flight_time"):
-                if ctx["flow_step"] != "flight_info":
-                    ctx["flow_step"] = "flight_info"
-                    ctx["locked_slots"]["flight_type"] = "arrival" if loc_slot == "pickup" else "departure"
-                    if current_lang == "ur":
-                        response_text = f"Theek hai, {lv}. Aapki flight ka time kya hai?"
-                    else:
-                        response_text = f"Got it, {lv}. What time is your flight?"
+                ctx["flow_step"] = "flight_info"
+                ctx["locked_slots"]["flight_type"] = "arrival" if loc_slot == "pickup" else "departure"
 
-        # ✅ CLEAN UNIFIED STATE MACHINE 
-        # (This avoids hitting the final 'else' incorrectly)
+        response_text = nlu.get("response", "Could you repeat that?")
+
+        # ✅ FUNCTIONAL LOGIC CHAIN (prevents hitting the final 'else')
+        if ctx["flow_step"] in ["dropoff", "pickup", "name", "notes", "vehicle"]:
+             pass # Use response_text from Brain
+
         
+        # ✅ SKIP OLD REDUNDANT STEPS - Just use Brain's response
+        # We only keep the specific logic for time parsing and booking creation
+        # ✅ FUNCTIONAL LOGIC CHAIN (prevents hitting the final 'else')
+        # These steps use the response generated by the Brain above.
         if ctx["flow_step"] in ["dropoff", "pickup", "name", "notes", "vehicle", "passengers", "luggage"]:
-             # These are fully handled by the Brain result at the top
              pass 
 
         
