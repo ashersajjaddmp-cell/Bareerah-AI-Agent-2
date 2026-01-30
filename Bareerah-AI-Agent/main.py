@@ -515,7 +515,16 @@ NEGATIVE_TOKENS_UR = {"haan", "nahi", "theek", "acha", "bas", "yahan", "wahan", 
 NEGATIVE_TOKENS_AR = {"نعم", "لا", "هنا", "هناك", "تمام", "حسنا"}
 
 # ✅ Geo-semantic markers (Req #4)
-GEO_MARKERS = {"airport", "mall", "tower", "street", "road", "avenue", "hotel", "terminal", "marina", "downtown", "city"}
+GEO_MARKERS = {
+    "airport", "mall", "tower", "street", "road", "avenue", "hotel", "terminal", "marina", "downtown", "city",
+    "residence", "village", "jvc", "jlt", "palm", "beach", "park", "souq", "market", "university", "college",
+    "school", "hospital", "clinic", "metro", "station", "stop", "area", "zone", "cluster", "block", "house",
+    "villa", "apartment", "burj", "khalifa", "frame", "museum", "opera", "atlantis", "garden", "resort",
+    "palace", "creek", "harbour", "hills", "meadows", "springs", "lakes", "island", "world", "canal",
+    "gate", "center", "centre", "plaza", "square", "court", "heights", "views", "oasis", "silicon",
+    "media", "internet", "studio", "sports", "motor", "investment", "business", "bay", "walk", "residences",
+    "suites", "inn", "restaurant", "cafe", "club", "gym", "cinema", "theatre", "stadium", "arena"
+}
 
 # ✅ PATCH: Hard-block generic/garbage words (Req #1)
 GENERIC_WORDS_EN = {"location", "airport", "mall", "here", "there", "this", "that", "yes", "no", "ok", "okay", "right", "sure", "maybe"}
@@ -3125,8 +3134,9 @@ def extract_pickup_location_llm(text: str) -> str:
             return None
         
         # ✅ LAYER 3: FINAL CHECK - Make sure extracted location has at least 2 tokens
-        location_tokens = location.split()
-        if len(location_tokens) < 2:
+        # ✅ LAYER 3: FINAL CHECK - Make sure extracted location is valid
+        # FIX: Removed strict 2-token check which blocked valid 1-word locations like "JVC", "DIP", "Airport"
+        if len(location_tokens) < 1:
             print(f"[LLM] ❌ Location too short: '{location}' ({len(location_tokens)} tokens)", flush=True)
             return None
         
