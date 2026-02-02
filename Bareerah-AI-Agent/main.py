@@ -3499,6 +3499,22 @@ def extract_nlu_clean(text, flow_step, locked_slots, lang="en"):
             "expo city": "Expo City Dubai", "sheikh zayed road": "Sheikh Zayed Road",
             "al barsha": "Al Barsha", "business bay": "Business Bay", "deira": "Deira",
             "bur dubai": "Bur Dubai", "karama": "Al Karama", "jlt": "Jumeirah Lakes Towers",
+            "jw marriott": "JW Marriott Marquis Hotel Dubai", "marquis": "JW Marriott Marquis Hotel Dubai",
+            "marriott marquis": "JW Marriott Marquis Hotel Dubai", "paramount": "Paramount Hotel Dubai",
+            "address boulevard": "Address Boulevard", "address sky view": "Address Sky View",
+            "address fontaine": "Address Downtown", "address mall": "Address Dubai Mall",
+            "palazzo versace": "Palazzo Versace Dubai", "armani hotel": "Armani Hotel Dubai",
+            "five palm": "FIVE Palm Jumeirah Hotel", "five village": "FIVE Jumeirah Village",
+            "goyal": "Goya Dubai", "hilton marina": "Hilton Dubai Jumeirah",
+            "sofitel": "Sofitel Dubai The Obelisk", "raffles": "Raffles Dubai",
+            "movers": "Movenpick Hotel", "marriott jbr": "Marriott Resort Palm Jumeirah",
+            "pullman": "Pullman Dubai Downtown", "four seasons": "Four Seasons Resort Dubai",
+            "taj dubai": "Taj Dubai", "oberoi": "The Oberoi Dubai",
+            "dubai opera": "Dubai Opera", "frame": "Dubai Frame", "museum of future": "Museum of the Future",
+            "la mer": "La Mer Dubai", "kite beach": "Kite Beach", "city walk": "City Walk Dubai",
+            "festival city": "Dubai Festival City", "dragon mart": "Dragon Mart Dubai",
+            "outlet mall": "Dubai Outlet Mall", "ibn battuta": "Ibn Battuta Mall",
+            "gold souq": "Dubai Gold Souk", "spice souq": "Dubai Spice Souk",
         }
         
         # Map flow_step to context for GPT-4o
@@ -3529,27 +3545,28 @@ BOOKING STATUS (ALREADY CONFIRMED):
 {known_str}
 
 CURRENT FOCUS: {flow_step}
+ALL STEPS IN ORDER: [name, name_confirm, dropoff, pickup, datetime, passengers, luggage, notes, confirm]
 
 TASK:
-1. Extract any mentioned info from: [dropoff, pickup, datetime, passengers, luggage, name].
-2. Generate a natural, polite response in {lang}. Acknowledge what they just said before asking for the next missing piece.
-3. IMPORTANT: DO NOT ask for anything listed in the BOOKING STATUS above.
-4. Suggest the next MISSING field as 'next_step'.
+1. Extract info from the user's speech.
+2. If the user provided info for the CURRENT FOCUS, acknowledge it.
+3. Determine the NEXT missing slot from the 'ALL STEPS' list that is NOT in the 'BOOKING STATUS'.
+4. GENERATE a conversational response in {lang} that acknowledges the user and asks for the NEXT missing slot.
+5. If everything is collected, return 'confirm' as 'next_step'.
 
 Return ONLY this JSON:
 {{
   "extracted_slots": {{ "slot_name": "value" }},
   "confidence": 0.0-1.0,
-  "response": "your natural conversational response",
-  "next_step": "the next missing slot ONLY"
+  "response": "Acknowledge what they said + Ask for the NEXT missing slot",
+  "next_step": "the NEXT missing slot"
 }}
 
 RULES:
-- If user provides info already confirmed, just acknowledge it.
-- If user corrects info (e.g. "Actually I mean Dubai Mall"), extract it and update your response.
-- If 'text' is empty/silent: Generate the opening phrase for the CURRENT FOCUS.
-- For 'vehicle_offer': "We have a [Vehicle] for AED [Fare]. Shall I book it?"
-- Keep responses short, clear, and friendly.
+- NEVER ask a question for a slot already listed in 'BOOKING STATUS'.
+- If the user gives multiple details (e.g. "I'm Ali and I have 2 bags"), extract both and move to the next missing piece.
+- If 'text' is empty or just "hello", greeting the user and ask for the 'CURRENT FOCUS'.
+- Keep responses very short, clear, and professional.
 ALWAYS return valid JSON."""
 
         user = f'Customer said: "{text}"\n\nExtract and respond.'
@@ -4006,19 +4023,24 @@ def handle_call():
                     ctx["locked_slots"][slot] = val
                     print(f"[BRAIN] ✅ Extracted {slot}: {val}", flush=True)
 
-        # ✅ STATE GUARD: Determine the actual next step (NAME is now first)
-        all_steps = ["name", "dropoff", "pickup", "datetime", "passengers", "luggage", "notes"]
+        # ✅ STATE GUARD: Determine the actual next step
+        all_steps = ["name", "name_confirm", "dropoff", "pickup", "datetime", "passengers", "luggage", "notes"]
         suggested_next = nlu.get("next_step", ctx["flow_step"])
         
-        if suggested_next in ctx["locked_slots"] and ctx["locked_slots"].get(suggested_next):
-            for step in all_steps:
-                if not ctx["locked_slots"].get(step):
-                    ctx["flow_step"] = step
-                    break
-            else:
-                ctx["flow_step"] = "confirm"
+        # Force sequential progress: Find the first missing mandatory step
+        next_mandatory = ctx["flow_step"]
+        for step in all_steps:
+            if not ctx["locked_slots"].get(step) and step != "name_confirm":
+                next_mandatory = step
+                break
         else:
-            ctx["flow_step"] = suggested_next
+            next_mandatory = "confirm"
+            
+        # If LLM suggested a next step that is already locked, use our mandatory instead
+        if suggested_next in ctx["locked_slots"] and ctx["locked_slots"].get(suggested_next):
+             ctx["flow_step"] = next_mandatory
+        else:
+             ctx["flow_step"] = suggested_next
 
         # If airport, override to flight_info
         for loc_slot in ["pickup", "dropoff"]:
@@ -4668,8 +4690,28 @@ def handle_call():
             response_text = "Sorry, something went wrong. Let's start over. Where would you like to go?"
             ctx["flow_step"] = "dropoff"
         
+        # ✅ MISSION CRITICAL: FINAL SYNC GUARD (Fixes all loops)
+        # If flow_step moved forward but response is still sticking to old step keywords, REGENERATE.
+        low_resp = response_text.lower()
+        if ctx["flow_step"] == "luggage" and any(w in low_resp for w in ["name", "ali", "john", "who", "confirm", "speaking"]):
+             response_text = "Got it. How many bags or luggage will you have with you?"
+        elif ctx["flow_step"] == "notes" and any(w in low_resp for w in ["bag", "luggage", "many", "count"]):
+             response_text = "Noted. Any special requests for the driver, or should I proceed with the booking?"
+        elif ctx["flow_step"] == "datetime" and any(w in low_resp for w in ["pickup", "from", "where"]):
+             response_text = "Okay. And at what time do you need the ride?"
+        elif ctx["flow_step"] == "passengers" and any(w in low_resp for w in ["time", "when", "o'clock", "date"]):
+             response_text = "Perfect. How many passengers will be travelling?"
+        
+        # Multilingual sync (Urdu/Arabic Fallbacks)
+        if current_lang == "ur":
+            if ctx["flow_step"] == "luggage" and "luggage" not in response_text:
+                response_text = "Theek hai. Kitne bags honge aapke paas?"
+            elif ctx["flow_step"] == "notes" and "requests" not in response_text:
+                response_text = "Theek hai, note kar liya. Driver ke liye koi khaas hidayat?"
+
         # ✅ LOG BAREERAH RESPONSE
-        print(f"[BAREERAH] 🎤 {response_text}", flush=True)
+        print(f"[BAREERAH] 🎤 {response_text} (Target Step: {ctx['flow_step']})", flush=True)
+
         
         # ✅ DB-BACKED: Save state to PostgreSQL (crash-safe)
         save_call_state(call_sid, ctx)
