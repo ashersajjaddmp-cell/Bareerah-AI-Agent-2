@@ -4144,11 +4144,34 @@ def handle_call():
         
         # ✅ STEP 4: PASSENGERS
         elif ctx["flow_step"] == "passengers":
-            pass # Extraction handled by Brain + saved at top
+            if "passengers" not in ctx["locked_slots"]:
+                 pax_val = normalize_numeric_values(speech)
+                 if pax_val > 0:
+                     ctx["locked_slots"]["passengers"] = pax_val
+                     ctx["flow_step"] = "luggage"
+                     print(f"[FLOW] ✅ PASSENGERS LOCKED (manual): {pax_val}", flush=True)
+                     if not response_text: response_text = "Got it. Any luggage?"
 
         # ✅ STEP 5: LUGGAGE
         elif ctx["flow_step"] == "luggage":
-            pass # Extraction handled by Brain + saved at top
+            if "luggage" not in ctx["locked_slots"]:
+                # 1. Try numeric value from speech
+                lug_val = normalize_numeric_values(speech)
+                # If returns 0 but user didn't explicitly say "zero" or "no", it might be a failure.
+                # But normalize_numeric_values returns 0 on failure too.
+                # So only trust > 0 OR explicit zero words.
+                
+                if lug_val > 0:
+                    ctx["locked_slots"]["luggage"] = lug_val
+                    ctx["flow_step"] = "notes"
+                    print(f"[FLOW] ✅ LUGGAGE LOCKED (manual): {lug_val}", flush=True)
+                    if not response_text: response_text = "Noted. Any special requests for the driver?"
+                
+                elif any(w in speech.lower() for w in ["no", "none", "nothing", "skip", "nahi", "mafi", "zero", "0"]):
+                    ctx["locked_slots"]["luggage"] = 0
+                    ctx["flow_step"] = "notes"
+                    print(f"[FLOW] ✅ LUGGAGE LOCKED (manual): 0", flush=True)
+                    if not response_text: response_text = "Okay, no luggage. Any special requests?"
 
         # ✅ STEP 5.5: ASK FOR CUSTOMER NAME
         elif ctx["flow_step"] == "name":
