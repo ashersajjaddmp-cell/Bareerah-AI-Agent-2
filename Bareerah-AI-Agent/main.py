@@ -2028,9 +2028,12 @@ def send_email_notification(subject: str, body: str, booking_data: dict = None, 
             html_body = generate_professional_email_html(booking_data, body)
             msg.attach(MIMEText(html_body, 'html'))
         
-        # Send via Resend SMTP
-        server = smtplib.SMTP_SSL('smtp.resend.com', 465)
-        server.login('resend', RESEND_API_KEY)
+        # Send via Gmail SMTP (More reliable for personal use)
+        # server = smtplib.SMTP_SSL('smtp.resend.com', 465)
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        # Use App Password if 2FA is on, or standard password if "Less Secure Apps" enabled
+        server.login(os.environ.get("GMAIL_USER", "aizaz.dmp@gmail.com"), os.environ.get("GMAIL_PASSWORD", ""))
         server.send_message(msg)
         server.quit()
         
