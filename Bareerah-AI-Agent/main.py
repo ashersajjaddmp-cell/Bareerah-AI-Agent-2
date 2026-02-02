@@ -3542,6 +3542,7 @@ RULES:
 - If user corrects info (e.g. "Actually I mean Dubai Mall"), extract it and update your response.
 - If 'text' is empty/silent: Generate the opening phrase for the CURRENT FOCUS.
 - For 'vehicle_offer': "We have a [Vehicle] for AED [Fare]. Shall I book it?"
+- For 'name': Extract ONLY the person's name (e.g., "My name is Ali" -> "Ali"). Ignore fillers like "It is", "I am". 
 - Keep responses short, clear, and friendly.
 ALWAYS return valid JSON."""
 
