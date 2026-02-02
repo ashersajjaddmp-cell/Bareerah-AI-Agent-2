@@ -3664,7 +3664,7 @@ BOOKING STATUS (ALREADY COLLECTED):
 {known_str}
 
 CURRENT FOCUS: {flow_step}
-ALL STEPS IN ORDER: [customer_name, name_confirm, dropoff, pickup, datetime, passengers, luggage, notes, confirm]
+ALL STEPS IN ORDER: [customer_name, name_confirm, dropoff, pickup, datetime, passengers, luggage, confirm]
 
 TASK:
 1. Extract info from the user's speech.
@@ -4144,7 +4144,7 @@ def handle_call():
 
         # ✅ STATE GUARD: Determine the actual next step
         # Steps are the strings used in flow_step
-        all_steps = ["customer_name", "name_confirm", "dropoff", "pickup", "datetime", "passengers", "luggage", "notes", "vehicle"]
+        all_steps = ["customer_name", "name_confirm", "dropoff", "pickup", "datetime", "passengers", "luggage", "vehicle"]
         suggested_next = nlu.get("next_step", ctx["flow_step"])
         
         # Forces sequential progress: Find the first missing mandatory step
@@ -4157,7 +4157,7 @@ def handle_call():
                     break
                 continue # Skip in mandatory check otherwise
                 
-            if step in ["luggage", "notes"]:
+            if step in ["luggage"]:
                 # Checked differently: luggage must be in slots and not None
                 if step not in ctx["locked_slots"]:
                     next_mandatory = step
@@ -4333,25 +4333,41 @@ def handle_call():
                 # 1. Try numeric value from speech
                 lug_val = normalize_numeric_values(speech)
                 
-                if lug_val and lug_val > 0:
+                if lug_val is not None:
                     ctx["locked_slots"]["luggage"] = lug_val
-                    ctx["flow_step"] = "notes"
-                    print(f"[FLOW] ✅ LUGGAGE LOCKED (manual): {lug_val}", flush=True)
-                    response_text = "Noted. Any special requests for the driver?"
-                
-                elif any(w in speech.lower() for w in ["no", "none", "nothing", "skip", "nahi", "mafi", "zero", "0", "bag nahi", "no luggage"]):
-                    ctx["locked_slots"]["luggage"] = 0
-                    ctx["flow_step"] = "notes"
-                    print(f"[FLOW] ✅ LUGGAGE LOCKED (manual): 0", flush=True)
-                    response_text = "Okay, no luggage. Any special requests?"
+                    ctx["flow_step"] = "vehicle"
+                    print(f"[FLOW] ✅ LUGGAGE LOCKED (manual): {lug_val} -> Triggering VEHICLE recommendations", flush=True)
+                    
+                    # ✅ IMMEDIATE RECOMMENDATION (DRY: Reuse the common vehicle logic or manual build)
+                    pax = ctx["locked_slots"].get("passengers", 1)
+                    jwt_token = get_jwt_token()
+                    vehicle, options, err = suggest_vehicle(pax, lug_val, jwt_token)
+                    if vehicle:
+                        ctx["locked_slots"]["vehicle"] = vehicle
+                        pickup = ctx["locked_slots"].get("pickup", "")
+                        dropoff = ctx["locked_slots"].get("dropoff", "")
+                        distance_km = calculate_distance_google_maps(pickup, dropoff) or 25
+                        ctx["locked_slots"]["distance_km"] = distance_km
+                        fare = calculate_fare_api(distance_km, vehicle, "point_to_point", jwt_token) or (50 + int(distance_km * 3.5) + (int(lug_val) * 15))
+                        ctx["locked_slots"]["fare"] = f"AED {int(fare)}"
+                        best_model = options[0].get("model") if options else vehicle.upper()
+                        ctx["locked_slots"]["vehicle_model"] = best_model
+                        
+                        car_choices = [f"a {opt.get('model', opt['type'].upper())} (AED {opt.get('fare', int(fare))})" for opt in options[:3]]
+                        car_list_str = " or ".join(car_choices) if car_choices else "available cars"
+                        
+                        ctx["flow_step"] = "confirm"
+                        if current_lang == "ur": response_text = f"Theek hai. Hamare paas {car_list_str} available hain. Main {best_model} recommend karti hoon jis ka fare AED {int(fare)} hai. Confirm kar doon?"
+                        elif current_lang == "ar": response_text = f"Tamam. Ladayna {car_list_str}. Onasibuka {best_model} bi ujra {int(fare)} AED. Hal akid alhajz?"
+                        else: response_text = f"Got it. We have several options including {car_list_str}. I recommend the {best_model} with a fare of AED {int(fare)}. Shall I book it?"
+                    else:
+                        response_text = "Noted. I'm checking for available cars. One moment."
                 else:
-                    # If manual fails, use Brain's response_text
+                    # If manual fails, use Brain's response_text (default)
                     pass
             else:
-                # Already locked by Brain
-                if ctx["flow_step"] == "luggage":
-                    ctx["flow_step"] = "notes"
-                    response_text = "Noted. Any special requests for the driver?"
+                 # Already locked by Brain - transition to vehicle
+                 ctx["flow_step"] = "vehicle"
 
         # ✅ STEP 5.5: ASK FOR CUSTOMER NAME
         elif ctx["flow_step"] == "customer_name":
@@ -4402,29 +4418,13 @@ def handle_call():
                 response_text = "Oh, sorry! Could you please tell me your name again?"
 
         
-        # ✅ STEP 6: ASK FOR NOTES (waiting time, special requests) → AUTO-RUN VEHICLE
-        elif ctx["flow_step"] == "notes":
-            # ✅ TRANSLITERATE ONLY for skip detection (not for storage)
-            speech_transliterated = transliterate_hindi_to_roman(speech)
-            
-            # ✅ Check if skip intent using transliterated speech (for language-agnostic detection)
-            if detect_skip_intent(speech_transliterated):
-                ctx["locked_slots"]["notes"] = "None"  # ✅ Use string "None" to satisfy guard
-                print(f"[FLOW] ✅ NOTES SKIPPED (detected skip: '{speech_transliterated}' from '{speech}')", flush=True)
-            else:
-                # ✅ Store ORIGINAL speech, not transliterated version
-                if speech and len(speech.strip()) >= 3:
-                    ctx["locked_slots"]["notes"] = speech
-                    print(f"[FLOW] ✅ NOTES CAPTURED: {speech} (transliterated: {speech_transliterated})", flush=True)
-                else:
-                    ctx["locked_slots"]["notes"] = "None"  # ✅ Use string "None" to satisfy guard
-                    print(f"[FLOW] ⚠️ NOTES EMPTY, skipping", flush=True)
-            
-            # ✅ AUTO-RUN VEHICLE SELECTION IMMEDIATELY (no waiting for customer input)
-            ctx["flow_step"] = "vehicle"
+        # ✅ STEP 7: VEHICLE (Auto-recommendation & Sizing)
+        elif ctx["flow_step"] == "vehicle":
             pax = ctx["locked_slots"].get("passengers", 1)
             lug = ctx["locked_slots"].get("luggage", 0)
             jwt_token = get_jwt_token()
+            
+            # Get best vehicle and alternatives from backend
             vehicle, options, err = suggest_vehicle(pax, lug, jwt_token)
             
             if vehicle:
@@ -4437,83 +4437,32 @@ def handle_call():
                 # Fetch default fare for best fit
                 fare = calculate_fare_api(distance_km, vehicle, "point_to_point", jwt_token)
                 if not fare or fare <= 0:
-                    fare = 50 + int(distance_km * 3.5) + (lug * 20)
+                    fare = 50 + int(distance_km * 3.5) + (int(lug) * 15)
+                
+                # Store primary fare and model
+                best_model = options[0].get("model") if options else vehicle.upper()
                 ctx["locked_slots"]["fare"] = f"AED {int(fare)}"
-                ctx["flow_step"] = "confirm"
+                ctx["locked_slots"]["vehicle_model"] = best_model
                 
                 # ✅ DYNAMIC CAR LIST FROM BACKEND
                 car_choices = []
-                for opt in options[:3]: # Show top 3
+                for opt in options[:3]: 
                     model = opt.get("model") or opt.get("type").upper()
-                    # If backend gave fare, use it, else we use our calculated one (simplified for list)
-                    est_fare = opt.get("fare") or int(fare)
-                    car_choices.append(f"a {model} (AED {est_fare})")
-                
-                car_list_str = " or ".join(car_choices) if car_choices else "available cars"
-                best_model = options[0].get("model") or vehicle.upper()
-                
-                response_text = f"Perfect. We have several options available for you, including {car_list_str}. Based on your group of {pax}, I recommend the {best_model} for {ctx['locked_slots']['fare']}. Shall I book it?"
-                
-                # ✅ PROFESSIONAL: Include vehicle MODEL name (not just category)
-                vehicle_models = {
-                    "suv": "GMC Yukon",
-                    "sedan": "Toyota Camry", 
-                    "luxury": "Lexus ES350",
-                    "van": "Toyota Previa",
-                    "luxury van": "Mercedes Viano",
-                    "urban suv": "Chevrolet Tahoe",
-                    "first class": "Lexus ES350",
-                    "executive": "Honda Accord",
-                    "elite van": "Mercedes Viano",
-                    "classic": "Toyota Corolla",
-                    "mini bus": "15-Seater Coach"
-                }
-                vehicle_model = vehicle_models.get(vehicle.lower(), vehicle.upper())
-                ctx["locked_slots"]["vehicle_model"] = vehicle_model
-                
-                # ✅ DYNAMIC OFFER GENERATION (No hardcoded words)
-                offer_nlu = extract_nlu_clean("", "vehicle_offer", ctx["locked_slots"], current_lang)
-                response_text = offer_nlu.get("response")
-                
-                # Fallback only if generation fails
-                if not response_text:
-                    response_text = f"We have a {vehicle_model} for {ctx['locked_slots']['fare']}. Shall I book it?"
-                
-                print(f"[FLOW] ✅ VEHICLE+FARE: {vehicle_model} ({vehicle}) | {ctx['locked_slots']['fare']} | {distance_km}km", flush=True)
-            else:
-                response_text = "Sorry, no vehicles available. Driver will call you."
-                ctx["flow_step"] = "complete"
-        
-        # ✅ STEP 7: VEHICLE (only if re-entered from confirmation rejection)
-        elif ctx["flow_step"] == "vehicle":
-            pax = ctx["locked_slots"].get("passengers", 1)
-            lug = ctx["locked_slots"].get("luggage", 0)
-            jwt_token = get_jwt_token()
-            vehicle, options, err = suggest_vehicle(pax, lug, jwt_token)
-            
-            if vehicle:
-                ctx["locked_slots"]["vehicle"] = vehicle
-                pickup = ctx["locked_slots"].get("pickup", "")
-                dropoff = ctx["locked_slots"].get("dropoff", "")
-                distance_km = ctx["locked_slots"].get("distance_km") or calculate_distance_google_maps(pickup, dropoff) or 25
-                fare = calculate_fare_api(distance_km, vehicle, "point_to_point", jwt_token)
-                if not fare or fare <= 0:
-                    fare = 50 + int(distance_km * 3.5) + (lug * 20)
-                ctx["locked_slots"]["fare"] = f"AED {int(fare)}"
-                
-                # ✅ DYNAMIC CAR LIST FROM BACKEND
-                car_choices = []
-                for opt in options[:3]:
-                    model = opt.get("model") or opt.get("type").upper()
+                    # Use provided fare or fall back to estimated
                     item_fare = opt.get("fare") or int(fare)
                     car_choices.append(f"a {model} (AED {item_fare})")
                 
                 car_list_str = " or ".join(car_choices) if car_choices else "available cars"
-                best_model = options[0].get("model") or vehicle.upper()
-                
                 ctx["flow_step"] = "confirm"
-                response_text = f"Great. We have available cars like {car_list_str}. Based on your needs, I recommend the {best_model} for {ctx['locked_slots']['fare']}. Should I proceed with the booking?"
-                print(f"[FLOW] ✅ VEHICLE+FARE (DESCRIPTIVE): {best_model} | {ctx['locked_slots']['fare']}", flush=True)
+                
+                if current_lang == "ur":
+                    response_text = f"Behtareen. Hamare paas {car_list_str} available hain. Aapke liye {best_model} munasib rahegi jis ka fare AED {int(fare)} hai. Kya main book kar doon?"
+                elif current_lang == "ar":
+                    response_text = f"Mumtaz. Ladayna {car_list_str}. Onasibuka {best_model} bi ujra {int(fare)} AED. Hal ahjuz lak?"
+                else:
+                    response_text = f"Perfect. We have several options including {car_list_str}. I recommend the {best_model} with a fare of AED {int(fare)}. Should I proceed with the booking?"
+                
+                print(f"[FLOW] ✅ VEHICLE+FARE: {best_model} | {ctx['locked_slots']['fare']}", flush=True)
             else:
                 response_text = "I'm looking for available cars. One moment please. Any specific car you prefer, like a Sedan or SUV?"
                 ctx["flow_step"] = "vehicle"
