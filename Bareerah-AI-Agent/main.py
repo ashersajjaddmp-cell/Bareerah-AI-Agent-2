@@ -434,10 +434,19 @@ def detect_language_from_speech(text: str, current_language: str) -> str:
     
     return current_language
 
-def convert_ogg_to_mp3(ogg_file_path: str) -> str:
-    """✅ Convert .ogg/.opus file to .mp3 using ffmpeg for Whisper compatibility"""
-    try:
-        # Check file size first
+    return current_language
+
+def detect_gender_from_speech(text: str) -> str:
+    """✅ Basic gender detection from keywords (Sir/Ma'am/Bhai/Behen)"""
+    text_lower = text.lower()
+    male_keywords = ["sir", "mister", "mr", "bhai", "bhaiya", "uncle", "larka", "boy", "man"]
+    female_keywords = ["maam", "madam", "miss", "mrs", "behen", "api", "larki", "girl", "woman", "lady"]
+    
+    if any(k in text_lower for k in male_keywords):
+        return "male"
+    if any(k in text_lower for k in female_keywords):
+        return "female"
+    return "unknown"
         file_size = os.path.getsize(ogg_file_path)
         if file_size == 0:
             print(f"[FFMPEG] ❌ Input file is empty! Size: {file_size}", flush=True)
@@ -4189,12 +4198,18 @@ def handle_call():
                  name = raw.title()
 
             if name:
+                # ✅ NEW: Go to CONFIRMATION step instead of locking immediately
+                ctx["temp_name"] = name
+                ctx["flow_step"] = "name_confirm"
+                
+                # ✅ Detect Gender (Basic)
+                gender = detect_gender_from_speech(speech)
+                if gender != "unknown":
+                    ctx["locked_slots"]["gender"] = gender
+                    print(f"[GENDER] 🚻 Detected: {gender}", flush=True)
 
-                ctx["locked_slots"]["customer_name"] = name
-                ctx["flow_step"] = "dropoff"  # ✅ Proceed to DROPOFF
-                # ✅ OVERRIDE NLU RESPONSE to ensure audio matches state
-                response_text = f"Thank you, {name}. Where would you like to go?"
-                print(f"[FLOW] ✅ NAME LOCKED: {name} -> Next: DROPOFF", flush=True)
+                response_text = f"Just to confirm, is your name {name}?"
+                print(f"[FLOW] ⏳ NAME CAPTURED: {name} -> Asking confirmation", flush=True)
 
             # ✅ SPELLING FALLBACK: If confidence low or uncertain, ask to spell
             if not response_text: 
@@ -4203,6 +4218,22 @@ def handle_call():
                 ctx["flow_step"] = "name" # Stay on name step
             
             if not response_text: response_text = nlu.get("response", "What is your name?")
+
+        # ✅ STEP 5.6: CONFIRM NAME (User says Yes/No)
+        elif ctx["flow_step"] == "name_confirm":
+            low_text = speech.lower()
+            if any(w in low_text for w in ["yes", "yeah", "ji", "han", "haan", "correct", "right", "sahi"]):
+                # Locked!
+                name = ctx.get("temp_name", "Customer")
+                ctx["locked_slots"]["customer_name"] = name
+                ctx["flow_step"] = "dropoff"
+                response_text = f"Perfect. Thank you, {name}. Where would you like to go?"
+                print(f"[FLOW] ✅ NAME LOCKED: {name} -> Next: DROPOFF", flush=True)
+            else:
+                # Retry
+                ctx["flow_step"] = "name"
+                response_text = "Oh, sorry! Could you please tell me your name again?"
+
         
         # ✅ STEP 6: ASK FOR NOTES (waiting time, special requests) → AUTO-RUN VEHICLE
         elif ctx["flow_step"] == "notes":
