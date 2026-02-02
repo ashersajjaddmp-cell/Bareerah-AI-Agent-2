@@ -4059,7 +4059,7 @@ def handle_call():
             ctx = load_call_state(call_sid)
             if not ctx:
                 ctx = {
-                    "flow_step": "name",  # ✅ CHANGE FLOW: Start with Name
+                    "flow_step": "customer_name",  # ✅ CHANGE FLOW: Start with Name
                     "locked_slots": {},
                     "caller_phone": request.values.get('From', 'unknown'),
                     "notes": "",
@@ -4108,7 +4108,7 @@ def handle_call():
         ctx = load_call_state(call_sid)
         if not ctx:
             ctx = {
-                "flow_step": "name",  # ✅ CHANGE FLOW: Start with Name
+                "flow_step": "customer_name",  # ✅ CHANGE FLOW: Start with Name
                 "locked_slots": {},
                 "caller_phone": request.values.get('From', 'unknown'),
                 "notes": "",
@@ -4157,7 +4157,12 @@ def handle_call():
                     break
                 continue # Skip in mandatory check otherwise
                 
-            if not ctx["locked_slots"].get(step):
+            if step in ["luggage", "notes"]:
+                # Checked differently: luggage must be in slots and not None
+                if step not in ctx["locked_slots"]:
+                    next_mandatory = step
+                    break
+            elif not ctx["locked_slots"].get(step):
                 next_mandatory = step
                 break
         else:
@@ -4170,13 +4175,16 @@ def handle_call():
             suggested_idx = all_steps.index(suggested_next)
             mandatory_idx = all_steps.index(next_mandatory)
             
+            # ✅ HARD BLOCK: Never skip Luggage or Notes if they are missing
+            if next_mandatory in ["luggage", "notes"] and suggested_next in ["vehicle", "confirm"]:
+                 suggested_next = next_mandatory
+                 print(f"[GUARD] 🛑 FORCING STEP: {next_mandatory} (AI tried to skip)", flush=True)
+
             if suggested_idx > mandatory_idx:
-                print(f"[GUARD] ⚠️ Pulling back: {suggested_next} -> {next_mandatory}", flush=True)
                 ctx["flow_step"] = next_mandatory
             else:
                 ctx["flow_step"] = suggested_next
         except ValueError:
-            # Fallback for transient or unknown steps
             ctx["flow_step"] = suggested_next if suggested_next else next_mandatory
 
         # If airport, override to flight_info
