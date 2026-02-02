@@ -434,8 +434,6 @@ def detect_language_from_speech(text: str, current_language: str) -> str:
     
     return current_language
 
-    return current_language
-
 def detect_gender_from_speech(text: str) -> str:
     """✅ Basic gender detection from keywords (Sir/Ma'am/Bhai/Behen)"""
     text_lower = text.lower()
@@ -447,6 +445,11 @@ def detect_gender_from_speech(text: str) -> str:
     if any(k in text_lower for k in female_keywords):
         return "female"
     return "unknown"
+
+def convert_ogg_to_mp3(ogg_file_path: str) -> str:
+    """✅ Convert .ogg/.opus file to .mp3 using ffmpeg for Whisper compatibility"""
+    try:
+        # Check file size first
         file_size = os.path.getsize(ogg_file_path)
         if file_size == 0:
             print(f"[FFMPEG] ❌ Input file is empty! Size: {file_size}", flush=True)
