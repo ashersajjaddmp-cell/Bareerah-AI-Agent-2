@@ -3781,7 +3781,7 @@ def incoming_call():
     ctx = load_call_state(call_sid)
     if not ctx:
         ctx = {
-            "flow_step": "dropoff",
+            "flow_step": "name",  # ✅ CHANGE FLOW: Ask NAME first
             "locked_slots": {},
             "caller_phone": caller_phone,
             "notes": ""
@@ -3796,7 +3796,7 @@ def incoming_call():
     call_timestamps[call_sid] = time.time()
     
     # ✅ DTMF LANGUAGE SELECTION: Accept digit press OR speech
-    greeting_lang = "Assalaam-o-Alaikum, Welcome to Star Skyline Limousine, I am Bareerah. Press 1 for English, 2 for Urdu, 3 for Arabic. Or just tell me where you want to go!"
+    greeting_lang = "Assalaam-o-Alaikum, Welcome to Star Skyline Limousine, I am Bareerah. Press 1 for English, 2 for Urdu, 3 for Arabic. Or just tell me, who am I speaking with?"
     print(f"[BAREERAH] 🎤 {greeting_lang}", flush=True)
     
     callback_url = request.url_root.rstrip('/') + "/call-status?call_sid=" + call_sid
@@ -3918,7 +3918,7 @@ def handle_call():
             ctx = load_call_state(call_sid)
             if not ctx:
                 ctx = {
-                    "flow_step": "dropoff",
+                    "flow_step": "name",  # ✅ CHANGE FLOW: Start with Name
                     "locked_slots": {},
                     "caller_phone": request.values.get('From', 'unknown'),
                     "notes": "",
@@ -3942,7 +3942,7 @@ def handle_call():
                 enhanced=True,
                 language=voice_config.get("stt_lang", "en-US")
             )
-            dropoff_msg = "Where would you like to go?" if selected_lang == "en" else "Aap kahan jana chahte hain?" if selected_lang == "ur" else "Aina tarid an thihab?"
+            dropoff_msg = "May I have your name please?" if selected_lang == "en" else "Aapka naam kya hai?" if selected_lang == "ur" else "Ma ismuka alkarim?"
             gather.say(dropoff_msg, voice=voice_config["voice"], language=voice_config.get("tts_lang", "en-US"))
             return str(resp)
         
@@ -3967,7 +3967,7 @@ def handle_call():
         ctx = load_call_state(call_sid)
         if not ctx:
             ctx = {
-                "flow_step": "dropoff",
+                "flow_step": "name",  # ✅ CHANGE FLOW: Start with Name
                 "locked_slots": {},
                 "caller_phone": request.values.get('From', 'unknown'),
                 "notes": "",
@@ -4001,8 +4001,8 @@ def handle_call():
                     ctx["locked_slots"][slot] = val
                     print(f"[BRAIN] ✅ Extracted {slot}: {val}", flush=True)
 
-        # ✅ STATE GUARD: Determine the actual next step
-        all_steps = ["dropoff", "pickup", "datetime", "passengers", "luggage", "name", "notes"]
+        # ✅ STATE GUARD: Determine the actual next step (NAME is now first)
+        all_steps = ["name", "dropoff", "pickup", "datetime", "passengers", "luggage", "notes"]
         suggested_next = nlu.get("next_step", ctx["flow_step"])
         
         if suggested_next in ctx["locked_slots"] and ctx["locked_slots"].get(suggested_next):
@@ -4163,12 +4163,18 @@ def handle_call():
                  name = raw.title()
 
             if name:
+            if name:
                 ctx["locked_slots"]["customer_name"] = name
-                ctx["flow_step"] = "notes"  # Proceed to NOTES, never back to passengers
+                ctx["flow_step"] = "dropoff"  # ✅ Proceed to DROPOFF
                 # ✅ OVERRIDE NLU RESPONSE to ensure audio matches state
-                # (Prevents AI from asking "How many passengers?" if NLU missed the name)
-                response_text = f"Thank you, {name}. Do you have any special notes for the driver?"
-                print(f"[FLOW] ✅ NAME LOCKED: {name} -> Next: NOTES", flush=True)
+                response_text = f"Thank you, {name}. Where would you like to go?"
+                print(f"[FLOW] ✅ NAME LOCKED: {name} -> Next: DROPOFF", flush=True)
+
+            # ✅ SPELLING FALLBACK: If confidence low or uncertain, ask to spell
+            if not response_text: 
+                # Check directly if nothing extracted yet
+                response_text = "I didn't quite get that. Could you please spell your name?"
+                ctx["flow_step"] = "name" # Stay on name step
             
             if not response_text: response_text = nlu.get("response", "What is your name?")
         
