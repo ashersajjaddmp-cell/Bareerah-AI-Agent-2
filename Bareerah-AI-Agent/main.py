@@ -47,7 +47,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
 GOOGLE_CLOUD_TTS_KEY = os.environ.get("GOOGLE_CLOUD_TTS_KEY")
 WEBSITE_URL = os.environ.get("WEBSITE_URL", "")
-BACKEND_BASE_URL = os.environ.get("BACKEND_BASE_URL", "https://5ef5530c-38d9-4731-b470-827087d7bc6f-00-2j327r1fnap1d.sisko.replit.dev")
+BACKEND_BASE_URL = os.environ.get("BACKEND_BASE_URL", "https://star-skyline-production.up.railway.app")
 BASE_API_URL = f"{BACKEND_BASE_URL}/api"
 BOOKING_ENDPOINT = f"{BACKEND_BASE_URL}/api/bookings/create-manual"
 
@@ -580,6 +580,72 @@ def init_db_pool():
     try:
         db_pool = pool.SimpleConnectionPool(minconn=1, maxconn=20, dsn=DATABASE_URL)
         print("[DB] ✅ Connection pool initialized", flush=True)
+        
+        # ✅ SYNC SCHEMA & CREATE TABLES (Req #6: Data Persistence)
+        try:
+            conn = db_pool.getconn()
+            cur = conn.cursor()
+            
+            # 1. Create bookings table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS bookings (
+                    id SERIAL PRIMARY KEY,
+                    customer_name TEXT,
+                    customer_phone TEXT,
+                    pickup_location TEXT,
+                    dropoff_location TEXT,
+                    calculated_fare_aed INTEGER,
+                    vehicle_type TEXT,
+                    service_type TEXT,
+                    number_of_passengers INTEGER,
+                    number_of_luggage INTEGER,
+                    booking_status TEXT,
+                    notes TEXT,
+                    pickup_time TEXT,
+                    customer_email TEXT,
+                    distance_km FLOAT,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+            
+            # 2. Create call_sessions table for state persistence
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS call_sessions (
+                    call_sid TEXT PRIMARY KEY,
+                    flow_step TEXT,
+                    locked_slots JSONB,
+                    caller_phone TEXT,
+                    notes TEXT,
+                    language TEXT,
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+            
+            # 3. Create call_logs table for conversation history
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS call_logs (
+                    call_id TEXT PRIMARY KEY,
+                    caller_phone TEXT,
+                    conversation_json JSONB,
+                    language TEXT,
+                    call_duration_seconds INTEGER,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+            
+            # 4. Ensure all columns exist (Migration support)
+            cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_time TEXT")
+            cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS customer_email TEXT")
+            cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS notes TEXT")
+            cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS distance_km FLOAT")
+            
+            conn.commit()
+            cur.close()
+            db_pool.putconn(conn)
+            print("[DB] ✅ Database tables and schema sync completed", flush=True)
+        except Exception as schema_err:
+            print(f"[DB] ⚠️ Schema sync warning: {schema_err}", flush=True)
+            
     except Exception as e:
         print(f"[DB] ❌ Pool error: {e}", flush=True)
 
@@ -851,6 +917,56 @@ def create_booking_direct(booking_payload: dict, endpoint: str = "/api/bookings/
         print(f"[BACKEND] ❌ Error: {e} - using local pending", flush=True)
         return False
 
+def save_booking_locally(payload: dict, status: str = "pending_confirmation") -> bool:
+    """✅ MISSION CRITICAL: Save booking to local PostgreSQL table 'bookings' for crash-safety and sync"""
+    try:
+        conn = get_db_conn()
+        if not conn:
+            print("[DB] ❌ Could not get connection for local save", flush=True)
+            return False
+            
+        cur = conn.cursor()
+        
+        # Get counts as int
+        pax = int(payload.get("passengers_count", 1))
+        lug = int(payload.get("luggage_count", 0))
+        fare = int(payload.get("fare_aed", payload.get("fare", 0)))
+        
+        cur.execute("""
+            INSERT INTO bookings (
+                customer_name, customer_phone, pickup_location, dropoff_location, 
+                calculated_fare_aed, vehicle_type, service_type, 
+                number_of_passengers, number_of_luggage, booking_status, 
+                notes, pickup_time, customer_email, distance_km, created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            RETURNING id
+        """, (
+            payload.get("customer_name", "Customer"),
+            payload.get("customer_phone", "unknown"),
+            payload.get("pickup_location", ""),
+            payload.get("dropoff_location", ""),
+            fare,
+            payload.get("vehicle_type", "sedan"),
+            payload.get("booking_type", "point_to_point"),
+            pax,
+            lug,
+            status,
+            payload.get("notes", ""),
+            payload.get("pickup_datetime", payload.get("pickup_time", "")),
+            payload.get("customer_email", ""),
+            float(payload.get("distance_km", 0))
+        ))
+        
+        booking_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        return_db_conn(conn)
+        print(f"[DB] ✅ Local booking saved: ID {booking_id} status={status}", flush=True)
+        return True
+    except Exception as e:
+        print(f"[DB] ❌ Local booking save failed: {e}", flush=True)
+        return False
+
 def test_backend_connection():
     """✅ Test backend connection without creating test bookings"""
     print(f"[BACKEND] ════════════════════════════════════════════════", flush=True)
@@ -896,7 +1012,8 @@ def sync_pending_bookings_to_backend(from_phone: str, jwt_token: str):
         cursor.execute("""
             SELECT id, customer_name, customer_phone, 
                    pickup_location, dropoff_location, calculated_fare_aed,
-                   vehicle_type, service_type, number_of_passengers, number_of_luggage
+                   vehicle_type, service_type, number_of_passengers, number_of_luggage,
+                   pickup_time, customer_email, notes, distance_km
             FROM bookings 
             WHERE customer_phone = %s AND booking_status = 'pending_confirmation'
             LIMIT 10
@@ -921,7 +1038,13 @@ def sync_pending_bookings_to_backend(from_phone: str, jwt_token: str):
                 "vehicle_type": booking[6],
                 "booking_type": booking[7],
                 "passengers_count": int(booking[8] or 1),
-                "luggage_count": int(booking[9] or 0)
+                "luggage_count": int(booking[9] or 0),
+                # MISSING (Bug fix)
+                "pickup_time": booking[10],
+                "pickup_datetime": booking[10],
+                "customer_email": booking[11],
+                "notes": booking[12],
+                "distance_km": booking[13]
             }
             
             result = backend_api("POST", "/bookings/create-manual", booking_payload, jwt_token)
@@ -1993,7 +2116,7 @@ def generate_professional_email_html(booking_data: dict, status_message: str) ->
     return html
 
 def send_email_notification(subject: str, body: str, booking_data: dict = None, recipient_email: str = None, retry_count: int = 0) -> bool:
-    """✅ Send email notification to team (Resend SMTP) with HTML template - WITH RETRY"""
+    """✅ Send email notification to team (Resend API) with HTML template - WITH RETRY"""
     try:
         if not RESEND_API_KEY:
             print(f"[EMAIL] ❌ FATAL: Resend API key not configured! Email CANNOT be sent!", flush=True)
@@ -2004,45 +2127,39 @@ def send_email_notification(subject: str, body: str, booking_data: dict = None, 
         # Use specific recipient or all notification emails
         recipients = [recipient_email] if recipient_email else NOTIFICATION_EMAILS
         
-        msg = MIMEMultipart('alternative')
-        msg['From'] = RESEND_EMAIL
-        msg['To'] = ", ".join(recipients)
-        msg['Subject'] = subject
-        
-        # Plain text fallback
-        text_body = body + "\n\n"
-        if booking_data:
-            text_body += "📋 Booking Details:\n"
-            text_body += f"  📞 Customer: {booking_data.get('customer_name', 'N/A')} ({booking_data.get('customer_phone', 'N/A')})\n"
-            text_body += f"  📍 Pickup: {booking_data.get('pickup_location', 'N/A')}\n"
-            text_body += f"  📍 Dropoff: {booking_data.get('dropoff_location', 'N/A')}\n"
-            text_body += f"  👥 Passengers: {booking_data.get('passengers_count', 'N/A')}\n"
-            text_body += f"  🧳 Luggage: {booking_data.get('luggage_count', 'N/A')}\n"
-            text_body += f"  💰 Fare: AED {booking_data.get('calculated_fare_aed', booking_data.get('fare', 'N/A'))}\n"
-            text_body += f"  🚗 Vehicle: {booking_data.get('vehicle_type', 'N/A')}\n"
-            text_body += f"  ✉️ Email: {booking_data.get('customer_email', 'N/A')}\n"
-        
-        # Attach plain text
-        msg.attach(MIMEText(text_body, 'plain'))
-        
-        # Generate and attach HTML
+        # Generate HTML body if booking data exists
+        html_body = None
         if booking_data:
             html_body = generate_professional_email_html(booking_data, body)
-            msg.attach(MIMEText(html_body, 'html'))
+        else:
+            html_body = f"<html><body><p>{body}</p></body></html>"
         
-        # Send via Gmail SMTP (More reliable for personal use)
-        # server = smtplib.SMTP_SSL('smtp.resend.com', 465)
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        # Use App Password if 2FA is on, or standard password if "Less Secure Apps" enabled
-        server.login(os.environ.get("GMAIL_USER", "aizaz.dmp@gmail.com"), os.environ.get("GMAIL_PASSWORD", ""))
-        server.send_message(msg)
-        server.quit()
+        # ✅ Resend API Call (Official Endpoint)
+        import requests
+        headers = {
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json"
+        }
         
-        print(f"[EMAIL] ✅ Notification sent to {', '.join(recipients)}: {subject}", flush=True)
-        return True
+        payload = {
+            "from": f"Bareerah AI <{RESEND_EMAIL}>",
+            "to": recipients,
+            "subject": subject,
+            "html": html_body,
+            "text": body
+        }
+        
+        r = requests.post("https://api.resend.com/emails", headers=headers, json=payload, timeout=10)
+        
+        if r.status_code in [200, 201]:
+            print(f"[EMAIL] ✅ Notification sent via Resend API: {subject}", flush=True)
+            return True
+        else:
+            print(f"[EMAIL] ❌ Resend API Error ({r.status_code}): {r.text[:200]}", flush=True)
+            raise Exception(f"Resend API returned {r.status_code}")
+            
     except Exception as e:
-        print(f"[EMAIL] ❌ Failed to send email (attempt {retry_count + 1}): {type(e).__name__}: {str(e)}", flush=True)
+        print(f"[EMAIL] ❌ Failed to send email (attempt {retry_count + 1}): {str(e)}", flush=True)
         
         # ✅ RETRY LOGIC: Try up to 3 times
         if retry_count < 2:
@@ -2050,6 +2167,8 @@ def send_email_notification(subject: str, body: str, booking_data: dict = None, 
             import time
             time.sleep(2)
             return send_email_notification(subject, body, booking_data, recipient_email, retry_count + 1)
+        
+        return False
         
         return False
 
@@ -2834,7 +2953,12 @@ def process_whatsapp_booking_slot(from_phone: str, incoming_text: str, ctx: dict
         print(f"[PAYLOAD] Sending {booking_type} booking to {endpoint}: {booking_payload}", flush=True)
         
         # Try to create booking
-        if create_booking_direct(booking_payload, endpoint=endpoint):
+        success = create_booking_direct(booking_payload, endpoint=endpoint)
+        
+        # ✅ SAVE LOCALLY ALWAYS (Req #6: Data Persistence)
+        save_booking_locally(booking_payload, status="confirmed" if success else "pending_confirmation")
+        
+        if success:
             booking["booking_status"] = "confirmed"
             print(f"[DB] ✅ Booking CONFIRMED with notes", flush=True)
             notify_booking_to_team(booking_payload, status="created")
@@ -4578,6 +4702,9 @@ def handle_call():
                     }
                     success = create_booking_direct(payload)
                     
+                    # ✅ SAVE LOCALLY ALWAYS (Req #6: Data Persistence)
+                    save_booking_locally(payload, status="confirmed" if success else "pending_confirmation")
+                    
                     # ✅ DYNAMIC BOOKING CONFIRMATION
                     confirm_nlu = extract_nlu_clean("", "booking_confirmed", ctx["locked_slots"], current_lang)
                     response_text = confirm_nlu.get("response") or "Your ride is confirmed! Driver will call you shortly. Thank you!"
@@ -4704,10 +4831,15 @@ def handle_call():
         
         # Multilingual sync (Urdu/Arabic Fallbacks)
         if current_lang == "ur":
-            if ctx["flow_step"] == "luggage" and "luggage" not in response_text:
+            if ctx["flow_step"] == "luggage" and "bags" not in low_resp and "luggage" not in low_resp:
                 response_text = "Theek hai. Kitne bags honge aapke paas?"
-            elif ctx["flow_step"] == "notes" and "requests" not in response_text:
+            elif ctx["flow_step"] == "notes" and "requests" not in low_resp:
                 response_text = "Theek hai, note kar liya. Driver ke liye koi khaas hidayat?"
+        elif current_lang == "ar":
+            if ctx["flow_step"] == "luggage" and "حقيبة" not in response_text and "bags" not in low_resp:
+                response_text = "تمام. كم حقيبة معك؟"
+            elif ctx["flow_step"] == "notes" and "طلبات" not in response_text and "requests" not in low_resp:
+                response_text = "تمام، تم التسجيل. هل لديك أي طلبات خاصة للسائق؟"
 
         # ✅ LOG BAREERAH RESPONSE
         print(f"[BAREERAH] 🎤 {response_text} (Target Step: {ctx['flow_step']})", flush=True)
