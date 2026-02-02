@@ -4163,7 +4163,7 @@ def handle_call():
                  name = raw.title()
 
             if name:
-            if name:
+
                 ctx["locked_slots"]["customer_name"] = name
                 ctx["flow_step"] = "dropoff"  # ✅ Proceed to DROPOFF
                 # ✅ OVERRIDE NLU RESPONSE to ensure audio matches state
