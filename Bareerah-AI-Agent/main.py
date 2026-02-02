@@ -4156,13 +4156,17 @@ def handle_call():
             # If AI didn't catch it, take the raw cleaned speech
             name = nlu.get("extracted_slots", {}).get("name") or nlu.get("extracted_value")
             
-            if not name and len(name_parts) > 0:
+            # Heuristic: If raw speech is short (1-3 words) and no digits, assume it's the name
+            if not name and 1 <= len(name_parts) <= 3 and not any(char.isdigit() for char in raw):
                  name = raw.title()
 
             if name:
                 ctx["locked_slots"]["customer_name"] = name
-                ctx["flow_step"] = "notes"
-                print(f"[FLOW] ✅ NAME LOCKED: {name}", flush=True)
+                ctx["flow_step"] = "notes"  # Proceed to NOTES, never back to passengers
+                # ✅ OVERRIDE NLU RESPONSE to ensure audio matches state
+                # (Prevents AI from asking "How many passengers?" if NLU missed the name)
+                response_text = f"Thank you, {name}. Do you have any special notes for the driver?"
+                print(f"[FLOW] ✅ NAME LOCKED: {name} -> Next: NOTES", flush=True)
             
             if not response_text: response_text = nlu.get("response", "What is your name?")
         
