@@ -107,13 +107,22 @@ STATIC_TTS_CACHE = {
 EMAIL_REGEX = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
 
 # ✅ STT LANGUAGE DETECTION: Keywords for Urdu/Arabic
-URDU_KEYWORDS = {"meri", "mera", "mein", "hoon", "hain", "malik", "sahab", "acha", "theek", "bilkul", "kahan", "jana", "chalo", "karo", "ruko", "subah", "shaam", "kal", "aaj", "abhi", "jee", "naam"}
-ARABIC_KEYWORDS = {"alhijra", "almarina", "masr", "ahal", "tayyib", "sahih", "almaer", "hawaya", "aiwa", "naam", "shukran", "marhaba", "ahlan", "yalla", "bukra", "alyawm", "sabah", "masa"}
+URDU_KEYWORDS = {"meri", "mera", "mein", "hoon", "hain", "malik", "sahab", "acha", "theek", "bilkul", "kahan", "jana", "chalo", "karo", "ruko", "subah", "shaam", "kal", "aaj", "abhi", "jee", "naam", "aap", "chahiye", "kitne", "shukriya", "zaroorat", "gaari", "booking", "airport", "mall"}
+ARABIC_KEYWORDS = {"alhijra", "almarina", "masr", "ahal", "tayyib", "sahih", "almaer", "hawaya", "aiwa", "naam", "shukran", "marhaba", "ahlan", "yalla", "bukra", "alyawm", "sabah", "masa", "اين", "مطار", "دبي", "سيارة", "حجز", "شكرا"}
+
+# ✅ STT HINTS: Commonly misunderstood domain words in Dubai (English/Urdu/Arabic sounds)
+STT_HINTS = (
+    "Star Skyline Limousine, Bareerah, Dubai Mall, Burj Khalifa, Marina Mall, JBR, JLT, "
+    "DXB Airport, DWC, Al Maktoum, Business Bay, Deira, Bur Dubai, Sheikh Zayed Road, "
+    "Palm Jumeirah, Atlantis, GMC Yukon, Chevrolet Tahoe, Lexus, Toyota Camry, "
+    "Sedan, SUV, Luxury, Van, Mini Bus, Passengers, Luggage, Booking, Confirm, "
+    "Assalam, Shukran, Theek hai, Haan, Jee, Chahiye, Jana hai"
+)
 
 # ✅ MULTI-LANGUAGE TTS + STT: Voice and speech recognition mapping
 POLLY_VOICES = {
     "en": {"voice": "Polly.Joanna", "tts_lang": "en-US", "stt_lang": "en-US"},
-    "ur": {"voice": "Polly.Aditi", "tts_lang": "hi-IN", "stt_lang": "hi-IN"},  # Hindi closest to Urdu
+    "ur": {"voice": "Polly.Aditi", "tts_lang": "hi-IN", "stt_lang": "ur-PK"},  # Polly uses hi-IN for TTS, but Twilio supports ur-PK for STT
     "ar": {"voice": "Polly.Zeina", "tts_lang": "arb", "stt_lang": "ar-SA"}
 }
 
@@ -292,20 +301,29 @@ def detect_language(text):
     """Detect language from customer speech - returns 'en', 'ur', or 'ar'"""
     if not text:
         return "en"
-    text_lower = text.lower()
+    
+    # Transliterate if Hindi/Urdu script is present to match our keyword list
+    text_roman = transliterate_hindi_to_roman(text)
+    text_lower = text_roman.lower()
     words = set(text_lower.split())
     
-    # Check for Urdu keywords
+    # Check for keywords
     urdu_matches = len(words & URDU_KEYWORDS)
     arabic_matches = len(words & ARABIC_KEYWORDS)
     
-    if urdu_matches >= 2:
+    # Also check raw text for Arabic script characters
+    if any('\u0600' <= c <= '\u06FF' for c in text):
+        # Could be Urdu or Arabic, prioritize Arabic if keywords match
+        if arabic_matches > urdu_matches: return "ar"
         return "ur"
-    if arabic_matches >= 2:
+    
+    if urdu_matches >= 1:
+        return "ur"
+    if arabic_matches >= 1:
         return "ar"
     
     # Check for Urdu sentence patterns
-    urdu_patterns = ["mujhe", "chahiye", "hai", "hain", "karna", "jana"]
+    urdu_patterns = ["mujhe", "chahiye", "hai", "hain", "karna", "jana", "karo"]
     if any(p in text_lower for p in urdu_patterns):
         return "ur"
     
@@ -3512,8 +3530,13 @@ def extract_nlu_clean(text, flow_step, locked_slots, lang="en"):
         known = [f"- {k.replace('_', ' ').upper()}: {v}" for k, v in locked_slots.items() if v]
         known_str = "\n".join(known) if known else "None - This is the start of the booking."
         
-        system = f"""You are Bareerah, a human-like, professional limousine booking assistant for Star Skyline Limousine. 
-You are talking to a customer via voice. 
+        system = f"""You are Bareerah, a human-like, professional, and confident limousine booking assistant for Star Skyline Limousine. 
+You are talking to a customer via voice in Dubai. 
+
+AGENT PERSONALITY:
+- Professional, helpful, and premium. 
+- You speak naturally - NOT like a robot.
+- Use phrases like "Sure, I can help with that," "Perfect," or "Got it."
 
 BOOKING STATUS (ALREADY CONFIRMED):
 {known_str}
@@ -3521,14 +3544,17 @@ BOOKING STATUS (ALREADY CONFIRMED):
 CURRENT FOCUS: {flow_step}
 
 TASK:
-1. Extract any mentioned info from: [dropoff, pickup, datetime, passengers, luggage, name].
-2. Generate a natural, polite response in {lang}. Acknowledge what they just said before asking for the next missing piece.
-3. IMPORTANT: DO NOT ask for anything listed in the BOOKING STATUS above.
-4. Suggest the next MISSING field as 'next_step'.
+1. Extract any mentioned info: [dropoff, pickup, datetime, passengers, luggage, name].
+2. Identify the language the customer is using: [en, ur, ar].
+3. Generate a natural, polite response in that language. 
+4. Acknowledge their latest input (e.g., "Got it, Burj Khalifa!") before asking for the next missing piece.
+5. IMPORTANT: DO NOT ask for anything listed in the BOOKING STATUS above.
+6. Suggest the next MISSING field as 'next_step'.
 
 Return ONLY this JSON:
 {{
   "extracted_slots": {{ "slot_name": "value" }},
+  "detected_language": "en|ur|ar",
   "confidence": 0.0-1.0,
   "response": "your natural conversational response",
   "next_step": "the next missing slot ONLY"
@@ -3536,8 +3562,8 @@ Return ONLY this JSON:
 
 RULES:
 - If user provides info already confirmed, just acknowledge it.
-- If user corrects info (e.g. "Actually I mean Dubai Mall"), extract it and update your response.
-- Keep responses short, clear, and friendly.
+- If user corrects info, extract it and update your response.
+- Keep responses short, clear, and friendly (~10-15 words max).
 ALWAYS return valid JSON."""
 
         user = f'Customer said: "{text}"\n\nExtract and respond.'
@@ -3549,21 +3575,22 @@ ALWAYS return valid JSON."""
                 {"role": "user", "content": user}
             ],
             response_format={"type": "json_object"},
-            max_tokens=200,
+            max_tokens=250,
             timeout=5
         )
         
         result = json.loads(resp.choices[0].message.content)
         extracted_slots = result.get('extracted_slots', {})
-        # For backward compatibility with the rest of the script:
+        detected_lang = result.get('detected_language', lang)
+        
+        # For backward compatibility
         extracted = extracted_slots.get(flow_step) or result.get('extracted_value', '').strip()
         confidence = result.get('confidence', 0)
         response = result.get('response', 'Got it.')
         next_step = result.get('next_step', flow_step)
         
-        # ✅ SMART LOCATION FALLBACK (If LLM extracted nothing or low confidence)
+        # ✅ SMART LOCATION FALLBACK
         if flow_step in ["dropoff", "pickup"] and not extracted:
-            # (Keeping the word-match logic for safety)
             text_lower = text.lower()
             text_words = set(w for w in text_lower.split() if len(w) > 2)
             best_value = None
@@ -3580,9 +3607,10 @@ ALWAYS return valid JSON."""
                 extracted_slots[flow_step] = extracted
                 confidence = 0.9
         
-        print(f"[NLU] extracted={extracted_slots} | next={next_step} | response='{response[:50]}...'", flush=True)
+        print(f"[NLU] extracted={extracted_slots} | lang={detected_lang} | next={next_step}", flush=True)
         return {
             "extracted_slots": extracted_slots,
+            "detected_language": detected_lang,
             "extracted_value": extracted,
             "confidence": confidence,
             "response": response,
@@ -3802,6 +3830,7 @@ def incoming_call():
         timeout=30,
         enhanced=True,
         numDigits=1,  # ✅ Stop after 1 digit press
+        hints=STT_HINTS,  # ✅ Hints for better accuracy
         statusCallback=callback_url,
         statusCallbackMethod="POST"
     )
@@ -4595,6 +4624,7 @@ def handle_call():
             timeout=30,
             speech_timeout='auto',
             enhanced=True,
+            hints=STT_HINTS,  # ✅ Hints for better accuracy
             language=voice_config.get("stt_lang", "en-US")  # ✅ STT language for Urdu/Arabic
         )
         gather.say(response_text, voice=voice_config["voice"], language=voice_config.get("tts_lang", "en-US"))
