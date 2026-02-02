@@ -594,12 +594,12 @@ def init_db_pool():
                     customer_phone TEXT,
                     pickup_location TEXT,
                     dropoff_location TEXT,
-                    calculated_fare_aed INTEGER,
+                    fare_aed INTEGER,
                     vehicle_type TEXT,
-                    service_type TEXT,
-                    number_of_passengers INTEGER,
-                    number_of_luggage INTEGER,
-                    booking_status TEXT,
+                    booking_type TEXT,
+                    passengers_count INTEGER,
+                    luggage_count INTEGER,
+                    status TEXT,
                     notes TEXT,
                     pickup_time TEXT,
                     customer_email TEXT,
@@ -935,8 +935,8 @@ def save_booking_locally(payload: dict, status: str = "pending_confirmation") ->
         cur.execute("""
             INSERT INTO bookings (
                 customer_name, customer_phone, pickup_location, dropoff_location, 
-                calculated_fare_aed, vehicle_type, service_type, 
-                number_of_passengers, number_of_luggage, booking_status, 
+                fare_aed, vehicle_type, booking_type, 
+                passengers_count, luggage_count, status, 
                 notes, pickup_time, customer_email, distance_km, created_at
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             RETURNING id
@@ -952,7 +952,7 @@ def save_booking_locally(payload: dict, status: str = "pending_confirmation") ->
             lug,
             status,
             payload.get("notes", ""),
-            payload.get("pickup_datetime", payload.get("pickup_time", "")),
+            payload.get("pickup_time", payload.get("pickup_datetime", "")),
             payload.get("customer_email", ""),
             float(payload.get("distance_km", 0))
         ))
@@ -1011,11 +1011,12 @@ def sync_pending_bookings_to_backend(from_phone: str, jwt_token: str):
         # Get all pending bookings for this customer
         cursor.execute("""
             SELECT id, customer_name, customer_phone, 
-                   pickup_location, dropoff_location, calculated_fare_aed,
-                   vehicle_type, service_type, number_of_passengers, number_of_luggage,
-                   pickup_time, customer_email, notes, distance_km
+                   pickup_location, dropoff_location, distance_km, 
+                   fare_aed, vehicle_type, booking_type, 
+                   passengers_count, luggage_count, status, 
+                   notes, pickup_time, customer_email
             FROM bookings 
-            WHERE customer_phone = %s AND booking_status = 'pending_confirmation'
+            WHERE customer_phone = %s AND status = 'pending_confirmation'
             LIMIT 10
         """, (from_phone,))
         
@@ -3665,11 +3666,11 @@ def extract_nlu_clean(text, flow_step, locked_slots, lang="en"):
         system = f"""You are Bareerah, a human-like, professional limousine booking assistant for Star Skyline Limousine. 
 You are talking to a customer via voice. 
 
-BOOKING STATUS (ALREADY CONFIRMED):
+BOOKING STATUS (ALREADY COLLECTED):
 {known_str}
 
 CURRENT FOCUS: {flow_step}
-ALL STEPS IN ORDER: [name, name_confirm, dropoff, pickup, datetime, passengers, luggage, notes, confirm]
+ALL STEPS IN ORDER: [customer_name, dropoff, pickup, datetime, passengers, luggage, notes, confirm]
 
 TASK:
 1. Extract info from the user's speech.
@@ -4148,8 +4149,8 @@ def handle_call():
                     print(f"[BRAIN] ✅ Extracted {slot}: {val}", flush=True)
 
         # ✅ STATE GUARD: Determine the actual next step
-        # Unified keys: name, dropoff, pickup, datetime, passengers, luggage, notes, vehicle
-        all_steps = ["name", "dropoff", "pickup", "datetime", "passengers", "luggage", "notes", "vehicle"]
+        # Unified keys: customer_name, dropoff, pickup, datetime, passengers, luggage, notes, vehicle
+        all_steps = ["customer_name", "dropoff", "pickup", "datetime", "passengers", "luggage", "notes", "vehicle"]
         suggested_next = nlu.get("next_step", ctx["flow_step"])
         
         # Force sequential progress: Find the first missing mandatory step
@@ -4339,7 +4340,7 @@ def handle_call():
             raw = speech.lower().replace("my name is", "").replace("i am", "").replace("this is", "").strip()
             name_parts = raw.split()
             # If AI didn't catch it, take the raw cleaned speech
-            name = nlu.get("extracted_slots", {}).get("name") or nlu.get("extracted_value")
+            name = nlu.get("extracted_slots", {}).get("customer_name") or nlu.get("extracted_value")
             
             # Heuristic: If raw speech is short (1-3 words) and no digits, assume it's the name
             if not name and 1 <= len(name_parts) <= 3 and not any(char.isdigit() for char in raw):
@@ -4371,7 +4372,7 @@ def handle_call():
             if is_confirm:
                 # Locked!
                 name = ctx.get("temp_name", "Customer")
-                ctx["locked_slots"]["name"] = name
+                ctx["locked_slots"]["customer_name"] = name
                 ctx["flow_step"] = "dropoff"
                 response_text = f"Perfect. Thank you, {name}. Where would you like to go?"
                 print(f"[FLOW] ✅ NAME LOCKED: {name} -> Next: DROPOFF", flush=True)
@@ -4684,7 +4685,7 @@ def handle_call():
                     booking_type = "airport_transfer" if slots.get("flight_type") else "point_to_point"
                     
                     payload = {
-                        "customer_name": slots.get("name", "Customer"),  # ✅ Unified key
+                        "customer_name": slots.get("customer_name", "Customer"),  # ✅ Unified key
                         "customer_phone": ctx.get("caller_phone", "unknown"),
                         "pickup_location": slots.get("pickup", ""),
                         "dropoff_location": slots.get("dropoff", ""),
@@ -4782,7 +4783,6 @@ def handle_call():
         elif ctx["flow_step"] == "complete":
             try:
                 payload = dict(ctx.get("locked_slots", {}))
-                payload["customer_name"] = payload.get("name", "Customer")
                 payload["customer_phone"] = ctx.get("caller_phone", "unknown")
                 # ✅ Add notes (waiting time) to payload
                 if payload.get("notes"):
