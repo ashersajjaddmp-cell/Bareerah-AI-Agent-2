@@ -3613,10 +3613,12 @@ def incoming_call():
         input="speech dtmf",  # ✅ Accept BOTH speech AND digit press
         action="/handle?call_sid=" + call_sid,
         method="POST",
-        speech_timeout=2,
-        max_speech_time=30,
-        timeout=30,
+        speech_timeout='auto',   # 'auto' allows barge-in on greeting more effectively
+        max_speech_time=60,
+        timeout=10,             # Shorter initial timeout to catch silence faster
         enhanced=True,
+        speechModel='phone_call', # Optimize for phone audio
+
         numDigits=1,  # ✅ Stop after 1 digit press
         statusCallback=callback_url,
         statusCallbackMethod="POST"
@@ -3768,8 +3770,10 @@ def handle_call():
             voice_config = get_polly_voice(lang)
             
             resp = VoiceResponse()
-            gather = resp.gather(input='speech', action=f"/handle?call_sid={call_sid}", timeout=30, speech_timeout='auto', enhanced=True, language=voice_config.get("stt_lang", "en-US"))
-            gather.say("Sorry, I didn't catch that. Please repeat?", voice=voice_config["voice"], language=voice_config.get("tts_lang", "en-US"))
+            gather = resp.gather(input='speech', action=f"/handle?call_sid={call_sid}", timeout=10, speech_timeout=2, enhanced=True, speechModel='phone_call', language=voice_config.get("stt_lang", "en-US"))
+            # Just listen silently - don't say "Sorry" immediately to allow natural pauses
+            # OR play a very subtle "I'm listening" prompt
+            gather.say("I'm listening...", voice=voice_config["voice"], language=voice_config.get("tts_lang", "en-US")) 
             return str(resp)
         
         # ✅ DB-BACKED: Load state from PostgreSQL (crash-safe)
@@ -4409,8 +4413,9 @@ def handle_call():
             input='speech',
             action=f"/handle?call_sid={call_sid}",
             timeout=30,
-            speech_timeout='auto',
+            speech_timeout=2,      # Fixed 2s timeout for reliable end-of-speech detection
             enhanced=True,
+            speechModel='phone_call', # Optimize for phone
             language=voice_config.get("stt_lang", "en-US")  # ✅ STT language for Urdu/Arabic
         )
         gather.say(response_text, voice=voice_config["voice"], language=voice_config.get("tts_lang", "en-US"))
