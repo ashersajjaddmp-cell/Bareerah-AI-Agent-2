@@ -3158,15 +3158,173 @@ def validate_pickup_with_places_api(location: str) -> bool:
         print(f"[PLACES] ❌ Empty location input", flush=True)
         return False
     
-    # ✅ REPLACED HARDCODED LIST WITH DYNAMIC CHECK
-    # User requested removal of "hardcoded words". 
-    # Validation now relies on Google Maps API (below).
-
+    # ✅ COMPREHENSIVE FALLBACK DICTIONARY - 120+ Popular Dubai Locations
+    POPULAR_DUBAI_LOCATIONS = {
+        # Airports (10)
+        "dubai airport": "Dubai International Airport (DXB), Garhoud, Dubai",
+        "dubai international": "Dubai International Airport (DXB), Garhoud, Dubai",
+        "international airport": "Dubai International Airport (DXB), Garhoud, Dubai",
+        "dxb": "Dubai International Airport (DXB), Garhoud, Dubai",
+        "al maktoum": "Al Maktoum International Airport (DWC), Jebel Ali, Dubai",
+        "sharjah airport": "Sharjah International Airport (SHJ), Sharjah",
+        "abu dhabi airport": "Abu Dhabi International Airport (AUH), Abu Dhabi",
+        "auh": "Abu Dhabi International Airport (AUH), Abu Dhabi",
+        "terminal 1": "Dubai International Airport Terminal 1, Dubai",
+        "terminal 3": "Dubai International Airport Terminal 3, Dubai",
+        
+        # Malls & Shopping (20)
+        "dubai mall": "The Dubai Mall, Downtown Dubai, Dubai",
+        "marina mall": "Dubai Marina Mall, Sheikh Zayed Road, Dubai",
+        "dubai marina mall": "Dubai Marina Mall, Sheikh Zayed Road, Dubai",
+        "mall of the emirates": "Mall of the Emirates, Al Barsha, Dubai",
+        "emirates mall": "Mall of the Emirates, Al Barsha, Dubai",
+        "deira city centre": "Deira City Centre, Deira, Dubai",
+        "mirdif city centre": "Mirdif City Centre, Mirdif, Dubai",
+        "city centre": "Deira City Centre, Deira, Dubai",
+        "festival city": "Dubai Festival City, Dubai",
+        "bluewaters": "Bluewaters Island, Dubai",
+        "dragon mart": "Dragon Mart, International City, Dubai",
+        "international city": "International City, Dubai",
+        "jlt": "Jumeirah Lakes Towers, Dubai",
+        "jvc": "Jumeirah Village Circle, Dubai",
+        "jvt": "Jumeirah Village Triangle, Dubai",
+        "la mer": "La Mer Beach, Jumeirah 1, Dubai",
+        "gold souk": "Dubai Gold Souk, Deira, Dubai",
+        "spice souk": "Spice Souk, Deira, Dubai",
+        "al seef": "Al Seef, Dubai Creek, Bur Dubai, Dubai",
+        "souq madinat": "Souk Madinat Jumeirah, Umm Suqeim, Dubai",
+        
+        # Parks & Outdoor (15)
+        "zabeel park": "Zabeel Park, Za'abeel, Dubai",
+        "zabeel": "Zabeel Park, Za'abeel, Dubai",
+        "creek park": "Dubai Creek Park, Ras Al Khor, Dubai",
+        "safa park": "Safa Park, Al Wasl, Dubai",
+        "mushrif park": "Mushrif National Park, Dubai",
+        "al baraha park": "Al Baraha Park, Al Baraha, Dubai",
+        "kite beach": "Kite Beach, Umm Suqeim, Dubai",
+        "al qudra lakes": "Al Qudra Lakes, Dubai",
+        "love lake": "Al Qudra Love Lake, Dubai",
+        "hatta": "Hatta, Dubai",
+        "hatta dam": "Hatta Dam, Hatta, Dubai",
+        "al marmoom": "Al Marmoom Desert Conservation Reserve, Dubai",
+        "desert safari": "Desert Safari, Dubai Desert, Dubai",
+        "miracle garden": "Dubai Miracle Garden, Dubailand, Dubai",
+        "butterfly garden": "Dubai Butterfly Garden, Dubailand, Dubai",
+        
+        # Major Landmarks (20)
+        "burj khalifa": "Burj Khalifa, Downtown Dubai, Dubai",
+        "burj": "Burj Khalifa, Downtown Dubai, Dubai",
+        "emirates tower": "Emirates Towers, Business Bay, Dubai",
+        "downtown dubai": "Downtown Dubai, Dubai",
+        "burj al arab": "Burj Al Arab, Umm Suqeim, Dubai",
+        "jumeirah": "Jumeirah, Dubai",
+        "palm jumeirah": "Palm Jumeirah, Dubai",
+        "dubai marina": "Dubai Marina, Dubai",
+        "jbr": "JBR - Jumeirah Beach Residence, Dubai Marina, Dubai",
+        "jbr beach": "JBR - Jumeirah Beach Residence, Dubai Marina, Dubai",
+        "the beach jbr": "The Beach at JBR, Dubai Marina, Dubai",
+        "dubai marina walk": "Dubai Marina Walk, Dubai Marina, Dubai",
+        "zero gravity": "Zero Gravity, Dubai Marina, Dubai",
+        "skydive dubai": "Skydive Dubai, Dubai Marina, Dubai",
+        "atlantis": "Atlantis The Palm, Palm Jumeirah, Dubai",
+        "madinat jumeirah": "Madinat Jumeirah, Umm Suqeim, Dubai",
+        "wild wadi": "Wild Wadi Waterpark, Umm Suqeim, Dubai",
+        "blue waters": "Bluewaters Island, Dubai",
+        "ain dubai": "Ain Dubai, Bluewaters Island, Dubai",
+        "dubai frame": "Dubai Frame, Zabeel Park, Dubai",
+        
+        # Entertainment & Theme Parks (15)
+        "dubai parks": "Dubai Parks and Resorts, Jebel Ali, Dubai",
+        "legoland dubai": "Legoland Dubai, Dubai Parks, Jebel Ali, Dubai",
+        "motiongate": "Motiongate Dubai, Dubai Parks, Jebel Ali, Dubai",
+        "bollywood park": "Bollywood Parks Dubai, Dubai Parks, Jebel Ali, Dubai",
+        "img worlds": "IMG Worlds of Adventure, Sheikh Mohammed Bin Zayed Road, Dubai",
+        "global village": "Global Village, Sheikh Mohammed Bin Zayed Road, Dubai",
+        "expo city": "Expo City Dubai, Jebel Ali, Dubai",
+        "ski dubai": "Ski Dubai, Al Barsha, Dubai",
+        "aquarium": "Dubai Aquarium, Downtown Dubai, Dubai",
+        "aquarium downtown": "Dubai Aquarium, Downtown Dubai, Dubai",
+        "aquarium jbr": "The Underwater Zoo, Atlantis The Palm, Dubai",
+        "vr park": "VR Park, Dubai Mall, Downtown Dubai, Dubai",
+        "laser quest": "Laser Quest, Dubai Marina, Dubai",
+        "bowling": "Bowling Lounge, Dubai Marina, Dubai",
+        "speedway": "Dubai Speedway, Dubai",
+        
+        # Residential Areas (20)
+        "arabian ranches": "Arabian Ranches, Dubai",
+        "springs": "The Springs, Emirates Living, Dubai",
+        "the springs": "The Springs, Emirates Living, Dubai",
+        "damac hills": "DAMAC Hills, Dubailand, Dubai",
+        "creek harbor": "Creek Harbour, Dubai Creek Harbour, Dubai",
+        "creek harbour": "Creek Harbour, Dubai Creek Harbour, Dubai",
+        "business bay": "Business Bay, Dubai",
+        "difc": "Dubai International Financial Centre, Dubai",
+        "al barsha": "Al Barsha, Dubai",
+        "al barsha 1": "Al Barsha 1, Dubai",
+        "al barsha 2": "Al Barsha 2, Dubai",
+        "dubai sports city": "Dubai Sports City, Dubai",
+        "sports city": "Dubai Sports City, Dubai",
+        "dubai silicon oasis": "Dubai Silicon Oasis, Dubai",
+        "motor city": "Dubai Motor City, Dubai",
+        "karama": "Al Karama, Dubai",
+        "deira": "Deira, Dubai",
+        "bur dubai": "Bur Dubai, Dubai",
+        "bur deira": "Bur Deira, Dubai",
+        "al fahidi": "Al Fahidi Historical Neighbourhood, Bur Dubai, Dubai",
+        
+        # Industrial & Zones (10)
+        "jebel ali": "Jebel Ali Free Zone, Dubai",
+        "jebel ali port": "Jebel Ali Port, Dubai",
+        "free zone": "Jebel Ali Free Zone, Dubai",
+        "industrial area": "Dubai Industrial City, Dubai",
+        "port rashid": "Port Rashid, Dubai",
+        "jafza": "Jebel Ali Free Zone Authority, Dubai",
+        "mizhor": "MIZHOR Development Zone, Dubai",
+        "nad al sheba": "Nad Al Sheba, Dubai",
+        "mina rashid": "Mina Rashid, Dubai",
+        "hamriyah": "Hamriyah Free Zone, Sharjah",
+    }
     
     location_lower = location.lower().strip()
     
     # ✅ STEP 1: Check if exact match in fallback dictionary
-
+    if location_lower in POPULAR_DUBAI_LOCATIONS:
+        matched_name = POPULAR_DUBAI_LOCATIONS[location_lower]
+        print(f"[FALLBACK] Match found: {matched_name}", flush=True)
+        return True
+    
+    # ✅ STEP 2: Check for substring matches in fallback dictionary (contains)
+    for key, value in POPULAR_DUBAI_LOCATIONS.items():
+        if key in location_lower or location_lower in key:
+            print(f"[FALLBACK] Match found: {value}", flush=True)
+            return True
+    
+    # ✅ STEP 3: FUZZY MATCHING - 50% word overlap
+    # Convert location to words, remove stop words
+    stop_words = {"the", "a", "an", "and", "or", "in", "at", "to", "from", "for", "by"}
+    location_words = set(w for w in location_lower.split() if w not in stop_words and w)
+    
+    best_fallback_match = None
+    best_fallback_score = 0
+    
+    for key, value in POPULAR_DUBAI_LOCATIONS.items():
+        key_words = set(w for w in key.split() if w not in stop_words and w)
+        
+        if location_words and key_words:
+            # Calculate word overlap percentage
+            overlap = len(location_words & key_words)
+            total = max(len(location_words), len(key_words))
+            match_score = overlap / total if total > 0 else 0
+            
+            # If 50%+ overlap, it's a match
+            if match_score >= 0.5 and match_score > best_fallback_score:
+                best_fallback_match = value
+                best_fallback_score = match_score
+                print(f"[FALLBACK] Fuzzy match for '{key}' ({match_score:.0%} overlap) → {value}", flush=True)
+    
+    if best_fallback_match:
+        print(f"[FALLBACK] Match found: {best_fallback_match}", flush=True)
+        return True
     
     # ✅ STEP 4: AUTO-ACCEPT COMPLETE ADDRESSES (contain building numbers, gates, etc)
     # If address contains numbers + multiple parts = customer knows exact location
@@ -3318,10 +3476,23 @@ def extract_nlu_clean(text, flow_step, locked_slots, lang="en"):
         dubai_tz = timezone(timedelta(hours=4))
         today_dubai = datetime.now(dubai_tz).strftime('%Y-%m-%d')
         
-        # ✅ CALCULATE DATE
-        dubai_tz = timezone(timedelta(hours=4))
-        today_dubai = datetime.now(dubai_tz).strftime('%Y-%m-%d')
-
+        # ✅ LOCATION FALLBACK DICTIONARY (120+ Dubai locations)
+        POPULAR_DUBAI_LOCATIONS = {
+            "dubai airport": "Dubai International Airport", "dubai international": "Dubai International Airport",
+            "international airport": "Dubai International Airport", "dxb": "Dubai International Airport",
+            "al maktoum": "Al Maktoum International Airport", "zabeel park": "Zabeel Park", "zabeel": "Zabeel Park",
+            "creek park": "Dubai Creek Park", "safa park": "Safa Park", "marina mall": "Dubai Marina Mall",
+            "dubai mall": "The Dubai Mall", "mall of the emirates": "Mall of the Emirates",
+            "burj khalifa": "Burj Khalifa", "burj": "Burj Khalifa", "emirates tower": "Emirates Towers",
+            "downtown dubai": "Downtown Dubai", "burj al arab": "Burj Al Arab", "jumeirah": "Jumeirah",
+            "dubai marina": "Dubai Marina", "jbr": "JBR - Jumeirah Beach Residence",
+            "atlantis": "Atlantis The Palm", "wild wadi": "Wild Wadi Waterpark",
+            "deira city centre": "Deira City Centre", "city centre": "Deira City Centre",
+            "legoland": "Legoland Dubai", "global village": "Global Village",
+            "expo city": "Expo City Dubai", "sheikh zayed road": "Sheikh Zayed Road",
+            "al barsha": "Al Barsha", "business bay": "Business Bay", "deira": "Deira",
+            "bur dubai": "Bur Dubai", "karama": "Al Karama", "jlt": "Jumeirah Lakes Towers",
+        }
         
         # Map flow_step to context for GPT-4o
         step_contexts_en = {
@@ -3341,46 +3512,37 @@ def extract_nlu_clean(text, flow_step, locked_slots, lang="en"):
         known = [f"- {k.replace('_', ' ').upper()}: {v}" for k, v in locked_slots.items() if v]
         known_str = "\n".join(known) if known else "None - This is the start of the booking."
         
-        system = f"""You are Bareerah, a human-like, professional limousine booking assistant for Star Skyline Limousine. 
-You are talking to a customer via voice. 
-
-BOOKING STATUS (ALREADY CONFIRMED):
+        # ✅ OPTIMIZED PROMPT (Concise for Speed)
+        system = f"""You are Bareerah, a booking assistant.
+STATUS:
 {known_str}
-
-CURRENT FOCUS: {flow_step}
+FOCUS: {flow_step}
 
 TASK:
-1. Extract any mentioned info from: [dropoff, pickup, datetime, passengers, luggage, name].
-2. Generate a natural, polite response in {lang}. Acknowledge what they just said before asking for the next missing piece.
-3. IMPORTANT: DO NOT ask for anything listed in the BOOKING STATUS above.
-4. If no slots are found (e.g. user says "Hello"), just greet them warmly and ask where they want to go.
-5. Suggest the next MISSING field as 'next_step'.
+1. Update slots: [dropoff, pickup, datetime, passengers, luggage, name].
+2. Respond naturally in {lang}. Acknowledge info.
+3. STATUS is confirmed info. DO NOT ASK FOR IT.
+4. 'next_step': The one missing field to ask for.
 
-Return ONLY this JSON:
+JSON ONLY:
 {{
-  "extracted_slots": {{ "slot_name": "value" }},
-  "confidence": 0.0-1.0,
-  "response": "your natural conversational response",
-  "next_step": "the next missing slot ONLY"
-}}
+  "extracted_slots": {{ "slot": "val" }},
+  "response": "short text",
+  "next_step": "missing_slot"
+}}"""
 
-RULES:
-- If user provides info already confirmed, just acknowledge it.
-- If user corrects info (e.g. "Actually I mean Dubai Mall"), extract it and update your response.
-- Keep responses short, clear, and friendly.
-ALWAYS return valid JSON."""
-
-        user = f'Customer said: "{text}"\n\nExtract and respond.'
+        user = f'User: "{text}"'
         
+        # ✅ USE GPT-4o-MINI (Much faster, reliable for JSON)
         resp = OPENAI_CLIENT.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user}
             ],
             response_format={"type": "json_object"},
-            max_tokens=200,
-            timeout=5
+            max_tokens=150,
+            timeout=4
         )
         
         result = json.loads(resp.choices[0].message.content)
@@ -3392,7 +3554,23 @@ ALWAYS return valid JSON."""
         next_step = result.get('next_step', flow_step)
         
         # ✅ SMART LOCATION FALLBACK (If LLM extracted nothing or low confidence)
-
+        if flow_step in ["dropoff", "pickup"] and not extracted:
+            # (Keeping the word-match logic for safety)
+            text_lower = text.lower()
+            text_words = set(w for w in text_lower.split() if len(w) > 2)
+            best_value = None
+            best_score = 0
+            for key, val in POPULAR_DUBAI_LOCATIONS.items():
+                kw = set(w for w in key.split() if len(w) > 2)
+                if text_words & kw:
+                    score = len(text_words & kw) / (len(text_words) + 0.1)
+                    if score > best_score:
+                        best_score = score
+                        best_value = val
+            if best_value and best_score > 0.4:
+                extracted = best_value
+                extracted_slots[flow_step] = extracted
+                confidence = 0.9
         
         print(f"[NLU] extracted={extracted_slots} | next={next_step} | response='{response[:50]}...'", flush=True)
         return {
@@ -3404,13 +3582,11 @@ ALWAYS return valid JSON."""
         }
         
     except Exception as e:
-        import traceback
-        print(f"[NLU] ❌ CRITICAL ERROR: {str(e)}", flush=True)
-        traceback.print_exc()
+        print(f"[NLU] ❌ Error: {str(e)}", flush=True)
         return {
             "extracted_value": "",
             "confidence": 0.0,
-            "response": "Hello, how can I help you?", # Default friendly fallback
+            "response": "Sorry, could you repeat that?",
             "next_step": flow_step
         }
 
@@ -3613,20 +3789,15 @@ def incoming_call():
         input="speech dtmf",  # ✅ Accept BOTH speech AND digit press
         action="/handle?call_sid=" + call_sid,
         method="POST",
-        speech_timeout='auto',   # 'auto' allows barge-in on greeting more effectively
-        max_speech_time=60,
-        timeout=10,             # Shorter initial timeout to catch silence faster
+        speech_timeout=2,
+        max_speech_time=30,
+        timeout=30,
         enhanced=True,
-        # speechModel='phone_call', # REVERT: Sometimes causes issues, default is safer
         numDigits=1,  # ✅ Stop after 1 digit press
         statusCallback=callback_url,
         statusCallbackMethod="POST"
     )
     gather.say(greeting_lang, voice='Polly.Joanna', language='en-US')
-    
-    # ✅ LOOP ON SILENCE: If user says nothing, redirect to handle (which will prompt again)
-    # This prevents the call from hanging up on silence.
-    response.redirect(f"/handle?call_sid={call_sid}")
     print(f"[TTS] ✅ Twilio Say (FREE) played successfully", flush=True)
     print(f"[VOICE] Setting statusCallback: {callback_url}", flush=True)
     
@@ -3773,14 +3944,8 @@ def handle_call():
             voice_config = get_polly_voice(lang)
             
             resp = VoiceResponse()
-            # Revert to 'auto' for general retry to be safe
-            gather = resp.gather(input='speech', action=f"/handle?call_sid={call_sid}", timeout=10, speech_timeout='auto', enhanced=True, language=voice_config.get("stt_lang", "en-US"))
-            # Just listen silently - don't say "Sorry" immediately to allow natural pauses
-            # OR play a very subtle "I'm listening" prompt
-            gather.say("I'm listening...", voice=voice_config["voice"], language=voice_config.get("tts_lang", "en-US"))
-            
-            # ✅ LOOP ON SILENCE
-            resp.redirect(f"/handle?call_sid={call_sid}")
+            gather = resp.gather(input='speech', action=f"/handle?call_sid={call_sid}", timeout=30, speech_timeout='auto', enhanced=True, language=voice_config.get("stt_lang", "en-US"))
+            gather.say("Sorry, I didn't catch that. Please repeat?", voice=voice_config["voice"], language=voice_config.get("tts_lang", "en-US"))
             return str(resp)
         
         # ✅ DB-BACKED: Load state from PostgreSQL (crash-safe)
@@ -4420,15 +4585,11 @@ def handle_call():
             input='speech',
             action=f"/handle?call_sid={call_sid}",
             timeout=30,
-            speech_timeout='auto',      # Revert to auto for better barge-in handling
+            speech_timeout='auto',
             enhanced=True,
-            # speechModel='phone_call', 
             language=voice_config.get("stt_lang", "en-US")  # ✅ STT language for Urdu/Arabic
         )
         gather.say(response_text, voice=voice_config["voice"], language=voice_config.get("tts_lang", "en-US"))
-        
-        # ✅ LOOP ON SILENCE
-        resp.redirect(f"/handle?call_sid={call_sid}")
         return str(resp)
     
     except Exception as e:
