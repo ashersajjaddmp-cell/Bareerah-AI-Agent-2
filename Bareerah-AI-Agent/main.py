@@ -3512,37 +3512,45 @@ def extract_nlu_clean(text, flow_step, locked_slots, lang="en"):
         known = [f"- {k.replace('_', ' ').upper()}: {v}" for k, v in locked_slots.items() if v]
         known_str = "\n".join(known) if known else "None - This is the start of the booking."
         
-        # ✅ OPTIMIZED PROMPT (Concise for Speed)
-        system = f"""You are Bareerah, a booking assistant.
-STATUS:
+        system = f"""You are Bareerah, a human-like, professional limousine booking assistant for Star Skyline Limousine. 
+You are talking to a customer via voice. 
+
+BOOKING STATUS (ALREADY CONFIRMED):
 {known_str}
-FOCUS: {flow_step}
+
+CURRENT FOCUS: {flow_step}
 
 TASK:
-1. Update slots: [dropoff, pickup, datetime, passengers, luggage, name].
-2. Respond naturally in {lang}. Acknowledge info.
-3. STATUS is confirmed info. DO NOT ASK FOR IT.
-4. 'next_step': The one missing field to ask for.
+1. Extract any mentioned info from: [dropoff, pickup, datetime, passengers, luggage, name].
+2. Generate a natural, polite response in {lang}. Acknowledge what they just said before asking for the next missing piece.
+3. IMPORTANT: DO NOT ask for anything listed in the BOOKING STATUS above.
+4. Suggest the next MISSING field as 'next_step'.
 
-JSON ONLY:
+Return ONLY this JSON:
 {{
-  "extracted_slots": {{ "slot": "val" }},
-  "response": "short text",
-  "next_step": "missing_slot"
-}}"""
+  "extracted_slots": {{ "slot_name": "value" }},
+  "confidence": 0.0-1.0,
+  "response": "your natural conversational response",
+  "next_step": "the next missing slot ONLY"
+}}
 
-        user = f'User: "{text}"'
+RULES:
+- If user provides info already confirmed, just acknowledge it.
+- If user corrects info (e.g. "Actually I mean Dubai Mall"), extract it and update your response.
+- Keep responses short, clear, and friendly.
+ALWAYS return valid JSON."""
+
+        user = f'Customer said: "{text}"\n\nExtract and respond.'
         
-        # ✅ USE GPT-4o-MINI (Much faster, reliable for JSON)
         resp = OPENAI_CLIENT.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user}
             ],
             response_format={"type": "json_object"},
-            max_tokens=150,
-            timeout=4
+            max_tokens=200,
+            timeout=5
         )
         
         result = json.loads(resp.choices[0].message.content)
