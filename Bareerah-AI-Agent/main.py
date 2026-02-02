@@ -2057,7 +2057,8 @@ def notify_booking_to_team(booking_data: dict, status: str = "created"):
             "failed": "❌ Booking Failed - Customer May Not Have Confirmed",
             "dropped": "📞 Call Dropped - Customer May Need Follow-up",
             "partial_info": "⚠️ Partial Booking Data Collected - Customer May Need Follow-up",
-            "location_failed": "🚨 MISSED LEAD - Pickup Location Issue - Star Skyline"
+            "location_failed": "🚨 MISSED LEAD - Pickup Location Issue - Star Skyline",
+            "short_call": "📞 MISSED CALL / Short Interaction - Star Skyline"
         }
         
         body_map = {
@@ -2066,7 +2067,8 @@ def notify_booking_to_team(booking_data: dict, status: str = "created"):
             "failed": f"❌ Booking creation failed. Customer needs manual follow-up.",
             "dropped": f"📞 Customer call dropped mid-conversation. Please follow up immediately!",
             "partial_info": f"⚠️ Customer provided some booking details but didn't complete the full booking. Follow up with them!",
-            "location_failed": f"🚨 URGENT: Customer called but could not provide a valid pickup location after 3 attempts. PLEASE CALL THEM BACK IMMEDIATELY!"
+            "location_failed": f"🚨 URGENT: Customer called but could not provide a valid pickup location after 3 attempts. PLEASE CALL THEM BACK IMMEDIATELY!",
+            "short_call": f"📞 Customer called but hung up quickly (wait time < 30s). No valid booking data captured. Please call back!"
         }
         
         subject = subject_map.get(status, f"Booking Notification ({status})")
@@ -3865,13 +3867,13 @@ def call_status():
                 "issue": f"Call dropped - Data collected: {data_collected}/3 fields"
             }
             
-            # Send email if ANY data was collected
-            if data_collected > 0:
-                print(f"[EMAIL] 📧 Sending partial info email (async)...", flush=True)
-                notify_booking_to_team(dropped_booking_data, status="partial_info")
+            # Send email for ALL calls (even if 0 fields collected, to capture caller ID)
+            if data_collected >= 0:
+                print(f"[EMAIL] 📧 Sending dropped call email (async)...", flush=True)
+                notify_booking_to_team(dropped_booking_data, status="short_call" if data_collected == 0 else "partial_info")
                 print(f"[EMAIL] ✅ Sent call-drop alert for {caller_phone} (collected {data_collected}/3 fields)", flush=True)
             else:
-                print(f"[CALL-DROP] ℹ️ Call ended with no data collected", flush=True)
+                pass
             
             # ✅ FORCE: Wait 1 second to ensure email thread starts
             import time
