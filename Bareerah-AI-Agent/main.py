@@ -3542,7 +3542,6 @@ RULES:
 - If user corrects info (e.g. "Actually I mean Dubai Mall"), extract it and update your response.
 - If 'text' is empty/silent: Generate the opening phrase for the CURRENT FOCUS.
 - For 'vehicle_offer': "We have a [Vehicle] for AED [Fare]. Shall I book it?"
-- For 'name': EXTRACT THE NAME even if it's not English. If user says "Mera naam Ali hai", extract "Ali". Ignore "Mera naam", "Ism", "Ana".
 - Keep responses short, clear, and friendly.
 ALWAYS return valid JSON."""
 
@@ -3803,8 +3802,9 @@ def incoming_call():
         input="speech dtmf",  # ✅ Accept BOTH speech AND digit press
         action="/handle?call_sid=" + call_sid,
         method="POST",
-        speech_timeout="auto", # Smart timeout
-        timeout=10, # Longer wait for user to start speaking
+        speech_timeout=2,
+        max_speech_time=30,
+        timeout=30,
         enhanced=True,
         numDigits=1,  # ✅ Stop after 1 digit press
         statusCallback=callback_url,
