@@ -4150,12 +4150,20 @@ def handle_call():
 
         # ✅ STEP 5.5: ASK FOR CUSTOMER NAME
         elif ctx["flow_step"] == "name":
-            if nlu.get("confidence", 0) >= 0.7:
-                name = nlu.get("extracted_slots", {}).get("name") or nlu.get("extracted_value", "")
-                if name:
-                    ctx["locked_slots"]["customer_name"] = name.title()
-                    ctx["flow_step"] = "notes"
-                    print(f"[FLOW] ✅ NAME LOCKED: {name}", flush=True)
+            # Direct cleanup for name extraction
+            raw = speech.lower().replace("my name is", "").replace("i am", "").replace("this is", "").strip()
+            name_parts = raw.split()
+            # If AI didn't catch it, take the raw cleaned speech
+            name = nlu.get("extracted_slots", {}).get("name") or nlu.get("extracted_value")
+            
+            if not name and len(name_parts) > 0:
+                 name = raw.title()
+
+            if name:
+                ctx["locked_slots"]["customer_name"] = name
+                ctx["flow_step"] = "notes"
+                print(f"[FLOW] ✅ NAME LOCKED: {name}", flush=True)
+            
             if not response_text: response_text = nlu.get("response", "What is your name?")
         
         # ✅ STEP 6: ASK FOR NOTES (waiting time, special requests) → AUTO-RUN VEHICLE
