@@ -761,7 +761,7 @@ def log_completed_call(call_sid: str, ctx: dict, call_duration_secs: int = 0) ->
         conn.commit()
         cur.close()
         return_db_conn(conn)
-        print(f"[LOGS] ✅ Call logged for {call_sid}: {ctx.get('locked_slots', {}).get('customer_name', 'Unknown')}", flush=True)
+        print(f"[LOGS] ✅ Call logged for {call_sid}: {ctx.get('locked_slots', {}).get('name', 'Unknown')}", flush=True)
         return True
     except Exception as e:
         print(f"[LOGS] ⚠️ Failed to log call: {e}", flush=True)
@@ -4005,7 +4005,7 @@ def call_status():
             
             # Prepare notification data
             dropped_booking_data = {
-                "customer_name": "Customer (not provided)",
+                "customer_name": locked_slots.get("name", "Customer (not provided)"),
                 "customer_phone": caller_phone,
                 "dropoff_location": locked_slots.get("dropoff", "Not provided"),
                 "pickup_location": locked_slots.get("pickup", "Not provided"),
@@ -4148,13 +4148,14 @@ def handle_call():
                     print(f"[BRAIN] ✅ Extracted {slot}: {val}", flush=True)
 
         # ✅ STATE GUARD: Determine the actual next step
-        all_steps = ["name", "name_confirm", "dropoff", "pickup", "datetime", "passengers", "luggage", "notes"]
+        # Unified keys: name, dropoff, pickup, datetime, passengers, luggage, notes, vehicle
+        all_steps = ["name", "dropoff", "pickup", "datetime", "passengers", "luggage", "notes", "vehicle"]
         suggested_next = nlu.get("next_step", ctx["flow_step"])
         
         # Force sequential progress: Find the first missing mandatory step
         next_mandatory = ctx["flow_step"]
         for step in all_steps:
-            if not ctx["locked_slots"].get(step) and step != "name_confirm":
+            if not ctx["locked_slots"].get(step):
                 next_mandatory = step
                 break
         else:
@@ -4367,11 +4368,10 @@ def handle_call():
             # Broaden confirmation words for Urdu/English
             is_confirm = any(w in low_text for w in ["yes", "yeah", "yup", "ok", "okay", "ji", "han", "haan", "theek", "thik", "sahi", "bilkul", "correct", "right", "confirm"]) or \
                          any(w in speech_trans for w in ["haan", "ji", "thik", "sahi", "bilkul", "karo", "han"])
-            
             if is_confirm:
                 # Locked!
                 name = ctx.get("temp_name", "Customer")
-                ctx["locked_slots"]["customer_name"] = name
+                ctx["locked_slots"]["name"] = name
                 ctx["flow_step"] = "dropoff"
                 response_text = f"Perfect. Thank you, {name}. Where would you like to go?"
                 print(f"[FLOW] ✅ NAME LOCKED: {name} -> Next: DROPOFF", flush=True)
@@ -4388,15 +4388,15 @@ def handle_call():
             
             # ✅ Check if skip intent using transliterated speech (for language-agnostic detection)
             if detect_skip_intent(speech_transliterated):
-                ctx["notes"] = ""  # ✅ Explicitly set to empty string
+                ctx["locked_slots"]["notes"] = "None"  # ✅ Use string "None" to satisfy guard
                 print(f"[FLOW] ✅ NOTES SKIPPED (detected skip: '{speech_transliterated}' from '{speech}')", flush=True)
             else:
                 # ✅ Store ORIGINAL speech, not transliterated version
                 if speech and len(speech.strip()) >= 3:
-                    ctx["notes"] = speech
+                    ctx["locked_slots"]["notes"] = speech
                     print(f"[FLOW] ✅ NOTES CAPTURED: {speech} (transliterated: {speech_transliterated})", flush=True)
                 else:
-                    ctx["notes"] = ""  # ✅ Don't save empty/short strings
+                    ctx["locked_slots"]["notes"] = "None"  # ✅ Use string "None" to satisfy guard
                     print(f"[FLOW] ⚠️ NOTES EMPTY, skipping", flush=True)
             
             # ✅ AUTO-RUN VEHICLE SELECTION IMMEDIATELY (no waiting for customer input)
@@ -4610,6 +4610,9 @@ def handle_call():
             has_previous_request = any(kw in speech_lower for kw in previous_keywords)
             has_too_expensive = any(kw in speech_lower for kw in too_expensive_keywords)
             
+            # Use 'name' key throughout confirmation
+            slots = ctx.get("locked_slots", {})
+            
             # ✅ VEHICLE UPGRADE FLOW: DISABLED - Always skip upgrade flow
             if False and has_upgrade_request and not has_confirm_word:
                 # ✅ CAPTURE SNAPSHOT of original vehicle for rollback (store in LOCKED_SLOTS for DB persistence)
@@ -4681,7 +4684,7 @@ def handle_call():
                     booking_type = "airport_transfer" if slots.get("flight_type") else "point_to_point"
                     
                     payload = {
-                        "customer_name": slots.get("customer_name", "Customer"),  # ✅ Use collected name (already transliterated)
+                        "customer_name": slots.get("name", "Customer"),  # ✅ Unified key
                         "customer_phone": ctx.get("caller_phone", "unknown"),
                         "pickup_location": slots.get("pickup", ""),
                         "dropoff_location": slots.get("dropoff", ""),
@@ -4779,11 +4782,11 @@ def handle_call():
         elif ctx["flow_step"] == "complete":
             try:
                 payload = dict(ctx.get("locked_slots", {}))
-                payload["caller_phone"] = ctx.get("caller_phone", "unknown")
+                payload["customer_name"] = payload.get("name", "Customer")
+                payload["customer_phone"] = ctx.get("caller_phone", "unknown")
                 # ✅ Add notes (waiting time) to payload
-                # ✅ Add notes (waiting time) to payload
-                if ctx.get("notes"):
-                    payload["notes"] = ctx["notes"]
+                if payload.get("notes"):
+                    pass # Already in dict
                 create_booking_direct(payload)
                 
                 # ✅ DYNAMIC EXIT MESSAGE
