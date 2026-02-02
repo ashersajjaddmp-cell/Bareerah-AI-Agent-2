@@ -3504,6 +3504,9 @@ def extract_nlu_clean(text, flow_step, locked_slots, lang="en"):
             "luggage": "We are asking for the number of bags.",
             "name": "We are asking for the customer's name.",
             "notes": "We are asking for any special requests.",
+            "vehicle_offer": "We are presenting the recommended vehicle and fare. Ask for confirmation.",
+            "upgrade_select": "We are presenting luxury options. Ask which one they prefer.",
+            "booking_confirmed": "The booking is confirmed. Say goodbye politely.",
             "confirm": "We are asking to confirm the booking details.",
         }
         step_templates = step_contexts_en # Placeholder for backward compat if needed
@@ -3537,6 +3540,8 @@ Return ONLY this JSON:
 RULES:
 - If user provides info already confirmed, just acknowledge it.
 - If user corrects info (e.g. "Actually I mean Dubai Mall"), extract it and update your response.
+- If 'text' is empty/silent: Generate the opening phrase for the CURRENT FOCUS.
+- For 'vehicle_offer': "We have a [Vehicle] for AED [Fare]. Shall I book it?"
 - Keep responses short, clear, and friendly.
 ALWAYS return valid JSON."""
 
@@ -4212,10 +4217,14 @@ def handle_call():
                 vehicle_model = vehicle_models.get(vehicle.lower(), vehicle.upper())
                 ctx["locked_slots"]["vehicle_model"] = vehicle_model
                 
-                # ✅ FIX: Only say "Noted:" if customer actually said something (notes were recorded)
-                # Don't say it if they said "skip", "no", "nahi", etc.
-                notes_msg = f"Noted: {ctx['notes']}. " if ctx["notes"] and len(ctx["notes"].strip()) > 0 else ""
-                response_text = f"{notes_msg}Based on {pax} passengers and {lug} bags, we recommend a {vehicle_model}. Your fare is {ctx['locked_slots']['fare']}. Confirm?"
+                # ✅ DYNAMIC OFFER GENERATION (No hardcoded words)
+                offer_nlu = extract_nlu_clean("", "vehicle_offer", ctx["locked_slots"], current_lang)
+                response_text = offer_nlu.get("response")
+                
+                # Fallback only if generation fails
+                if not response_text:
+                    response_text = f"We have a {vehicle_model} for {ctx['locked_slots']['fare']}. Shall I book it?"
+                
                 print(f"[FLOW] ✅ VEHICLE+FARE: {vehicle_model} ({vehicle}) | {ctx['locked_slots']['fare']} | {distance_km}km", flush=True)
             else:
                 response_text = "Sorry, no vehicles available. Driver will call you."
@@ -4469,7 +4478,11 @@ def handle_call():
                         "flight_time": slots.get("flight_time", None)  # ISO 8601 UTC datetime
                     }
                     success = create_booking_direct(payload)
-                    response_text = "Your ride is confirmed! Driver will call you shortly. Thank you for choosing Star Skyline Limousine!"
+                    
+                    # ✅ DYNAMIC BOOKING CONFIRMATION
+                    confirm_nlu = extract_nlu_clean("", "booking_confirmed", ctx["locked_slots"], current_lang)
+                    response_text = confirm_nlu.get("response") or "Your ride is confirmed! Driver will call you shortly. Thank you!"
+                    
                     print(f"[BOOKING] ✅ CREATED: {payload}", flush=True)
                     
                     # ✅ SEND CONFIRMATION EMAIL even if backend fails (capture lead)
@@ -4529,13 +4542,11 @@ def handle_call():
             else:
                 vehicle_model = ctx["locked_slots"].get("vehicle_model", "SUV")
                 fare = ctx["locked_slots"].get("fare", "AED 220")
-                # ✅ MULTILINGUAL confirmation response
-                if current_lang == "ur":
-                    response_text = f"Hum {vehicle_model} bhej rahe hain. Aapka fare {fare} hai. Kya main confirm kar doon?"
-                elif current_lang == "ar":
-                    response_text = f"Sanaqduk {vehicle_model}. Ujratuk {fare}. Hal akid?"
-                else:
-                    response_text = f"We'll send a {vehicle_model}. Your fare is {fare}. Should I confirm your booking?"
+                
+                # ✅ DYNAMIC RE-CONFIRMATION
+                reconfirm_nlu = extract_nlu_clean("", "vehicle_offer", ctx["locked_slots"], current_lang)
+                response_text = reconfirm_nlu.get("response") or f"We'll send a {vehicle_model} for {fare}. Should I book it?" 
+                
                 print(f"[FLOW] ℹ️ Question answered, re-asking confirmation (lang={current_lang})", flush=True)
         
         # ✅ STEP 9-10: CREATE BOOKING & COMPLETE
@@ -4544,10 +4555,15 @@ def handle_call():
                 payload = dict(ctx.get("locked_slots", {}))
                 payload["caller_phone"] = ctx.get("caller_phone", "unknown")
                 # ✅ Add notes (waiting time) to payload
+                # ✅ Add notes (waiting time) to payload
                 if ctx.get("notes"):
                     payload["notes"] = ctx["notes"]
                 create_booking_direct(payload)
-                response_text = "Your ride is confirmed! Driver will call you shortly. Thank you!"
+                
+                # ✅ DYNAMIC EXIT MESSAGE
+                exit_nlu = extract_nlu_clean("", "booking_confirmed", ctx["locked_slots"], current_lang)
+                response_text = exit_nlu.get("response") or "Your ride is confirmed! Driver will call you shortly. Thank you!"
+                
                 print(f"[BOOKING] ✅ CREATED: {payload}", flush=True)
                 
                 # ✅ DB CLEANUP: Log call BEFORE deleting session
