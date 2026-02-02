@@ -4595,9 +4595,12 @@ def handle_call():
                 resp.hangup()
                 return str(resp)
         
+        elif ctx["flow_step"] in ["vehicle_offer", "upgrade_select"]:
+            pass # Handled above
+
         else:
-            response_text = "Sorry, something went wrong. Let's start over. Where would you like to go?"
-            ctx["flow_step"] = "dropoff"
+            # ✅ FALLBACK: Stay on current step instead of resetting
+            response_text = nlu.get("response") or "Sorry, I didn't catch that. Could you say it again?"
         
         # ✅ LOG BAREERAH RESPONSE
         print(f"[BAREERAH] 🎤 {response_text}", flush=True)
