@@ -3617,13 +3617,16 @@ def incoming_call():
         max_speech_time=60,
         timeout=10,             # Shorter initial timeout to catch silence faster
         enhanced=True,
-        speechModel='phone_call', # Optimize for phone audio
-
+        # speechModel='phone_call', # REVERT: Sometimes causes issues, default is safer
         numDigits=1,  # ✅ Stop after 1 digit press
         statusCallback=callback_url,
         statusCallbackMethod="POST"
     )
     gather.say(greeting_lang, voice='Polly.Joanna', language='en-US')
+    
+    # ✅ LOOP ON SILENCE: If user says nothing, redirect to handle (which will prompt again)
+    # This prevents the call from hanging up on silence.
+    response.redirect(f"/handle?call_sid={call_sid}")
     print(f"[TTS] ✅ Twilio Say (FREE) played successfully", flush=True)
     print(f"[VOICE] Setting statusCallback: {callback_url}", flush=True)
     
@@ -3770,10 +3773,14 @@ def handle_call():
             voice_config = get_polly_voice(lang)
             
             resp = VoiceResponse()
-            gather = resp.gather(input='speech', action=f"/handle?call_sid={call_sid}", timeout=10, speech_timeout=2, enhanced=True, speechModel='phone_call', language=voice_config.get("stt_lang", "en-US"))
+            # Revert to 'auto' for general retry to be safe
+            gather = resp.gather(input='speech', action=f"/handle?call_sid={call_sid}", timeout=10, speech_timeout='auto', enhanced=True, language=voice_config.get("stt_lang", "en-US"))
             # Just listen silently - don't say "Sorry" immediately to allow natural pauses
             # OR play a very subtle "I'm listening" prompt
-            gather.say("I'm listening...", voice=voice_config["voice"], language=voice_config.get("tts_lang", "en-US")) 
+            gather.say("I'm listening...", voice=voice_config["voice"], language=voice_config.get("tts_lang", "en-US"))
+            
+            # ✅ LOOP ON SILENCE
+            resp.redirect(f"/handle?call_sid={call_sid}")
             return str(resp)
         
         # ✅ DB-BACKED: Load state from PostgreSQL (crash-safe)
@@ -4413,12 +4420,15 @@ def handle_call():
             input='speech',
             action=f"/handle?call_sid={call_sid}",
             timeout=30,
-            speech_timeout=2,      # Fixed 2s timeout for reliable end-of-speech detection
+            speech_timeout='auto',      # Revert to auto for better barge-in handling
             enhanced=True,
-            speechModel='phone_call', # Optimize for phone
+            # speechModel='phone_call', 
             language=voice_config.get("stt_lang", "en-US")  # ✅ STT language for Urdu/Arabic
         )
         gather.say(response_text, voice=voice_config["voice"], language=voice_config.get("tts_lang", "en-US"))
+        
+        # ✅ LOOP ON SILENCE
+        resp.redirect(f"/handle?call_sid={call_sid}")
         return str(resp)
     
     except Exception as e:
