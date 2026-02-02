@@ -4174,11 +4174,21 @@ def handle_call():
         else:
             next_mandatory = "confirm"
             
-        # If LLM suggested a next step that is already locked, use our mandatory instead
-        if suggested_next in ctx["locked_slots"] and ctx["locked_slots"].get(suggested_next):
-             ctx["flow_step"] = next_mandatory
-        else:
-             ctx["flow_step"] = suggested_next
+        # Forces sequential progress: Mandatory steps ALWAYS take priority to prevent skipping
+        # If suggested_next is further than next_mandatory, we pull it back.
+        # This prevents the LLM from skipping luggage, notes, etc.
+        try:
+            suggested_idx = all_steps.index(suggested_next)
+            mandatory_idx = all_steps.index(next_mandatory)
+            
+            if suggested_idx > mandatory_idx:
+                print(f"[GUARD] ⚠️ Pulling back: {suggested_next} -> {next_mandatory}", flush=True)
+                ctx["flow_step"] = next_mandatory
+            else:
+                ctx["flow_step"] = suggested_next
+        except ValueError:
+            # Fallback for transient or unknown steps
+            ctx["flow_step"] = suggested_next if suggested_next else next_mandatory
 
         # If airport, override to flight_info
         for loc_slot in ["pickup", "dropoff"]:
@@ -4359,8 +4369,8 @@ def handle_call():
                  name = raw.title()
 
             if name:
-                # ✅ NEW: Go to CONFIRMATION step instead of locking immediately
-                ctx["temp_name"] = name
+                # ✅ FIX: Store temp_name in locked_slots for persistence across requests
+                ctx["locked_slots"]["temp_name"] = name
                 ctx["flow_step"] = "name_confirm"
                 
                 response_text = f"Just to confirm, is your name {name}?"
@@ -4370,7 +4380,7 @@ def handle_call():
             if not name: 
                 # If NLU didn't catch it and manual didn't catch it, ask to spell
                 response_text = "I didn't quite get that. Could you please spell your name?"
-                ctx["flow_step"] = "name" # Stay on name step
+                ctx["flow_step"] = "customer_name" # Stay on name step
             
             if not response_text: 
                 response_text = nlu.get("response", "What is your name?")
@@ -4383,8 +4393,9 @@ def handle_call():
                          any(w in speech_trans for w in ["haan", "ji", "thik", "sahi", "bilkul", "karo", "han"])
             if is_confirm:
                 # Locked!
-                name = ctx.get("temp_name", "Customer")
+                name = ctx["locked_slots"].get("temp_name", "Customer")
                 ctx["locked_slots"]["customer_name"] = name
+                ctx["locked_slots"].pop("temp_name", None) # Cleanup
                 ctx["flow_step"] = "dropoff"
                 response_text = f"Perfect. Thank you, {name}. Where would you like to go?"
                 print(f"[FLOW] ✅ NAME LOCKED: {name} -> Next: DROPOFF", flush=True)
@@ -4482,14 +4493,25 @@ def handle_call():
                 if not fare or fare <= 0:
                     fare = 50 + int(distance_km * 3.5) + (lug * 20)
                 ctx["locked_slots"]["fare"] = f"AED {int(fare)}"
-                ctx["flow_step"] = "confirm"
-                vehicle_model = ctx["locked_slots"].get("vehicle_model", vehicle.upper())
+                # ✅ SHOW AVAILABLE CARS (User request: don't loop on one model)
                 pax = ctx["locked_slots"].get("passengers", 1)
                 lug = ctx["locked_slots"].get("luggage", 0)
-                response_text = f"Based on {pax} passengers and {lug} bags, we recommend a {vehicle_model}. Your fare is {ctx['locked_slots']['fare']}. Confirm?"
-                print(f"[FLOW] ✅ VEHICLE+FARE: {vehicle_model} | {ctx['locked_slots']['fare']} | {distance_km}km", flush=True)
+                
+                # Available car list based on capacity
+                options = []
+                if pax <= 4 and lug <= 3: options.append("a Lexus Sedan (AED 120)")
+                if pax <= 6 and lug <= 6: options.append("a GMC Yukon SUV (AED 220)")
+                if pax <= 7 and lug <= 7: options.append("a Toyota Previa Van (AED 250)")
+                
+                car_list = " or ".join(options) if options else "a suitable vehicle"
+                ctx["locked_slots"]["vehicle"] = vehicle
+                ctx["flow_step"] = "confirm"
+                
+                response_text = f"Great. We have available cars like {car_list}. Based on your needs, I recommend the {vehicle_model} for {ctx['locked_slots']['fare']}. Should I proceed with the booking?"
+                print(f"[FLOW] ✅ VEHICLE+FARE (DESCRIPTIVE): {vehicle_model} | {ctx['locked_slots']['fare']}", flush=True)
             else:
-                response_text = "Sorry, no vehicles available. Try again?"
+                response_text = "I'm looking for available cars. One moment please. Any specific car you prefer, like a Sedan or SUV?"
+                ctx["flow_step"] = "vehicle"
         
         # ✅ STEP 7.5: UPGRADE SELECT (dedicated flow step for luxury vehicle selection)
         elif ctx["flow_step"] == "upgrade_select":
@@ -4686,35 +4708,40 @@ def handle_call():
                 # ✅ FIX: Create booking IMMEDIATELY (don't wait for next speech)
                 try:
                     slots = ctx.get("locked_slots", {})
-                    # ✅ Parse fare from "AED 619" format
-                    fare_raw = slots.get("fare", "0")
-                    fare_int = int(str(fare_raw).replace("AED", "").replace(",", "").strip()) if fare_raw else 0
+                    # ✅ SAFE PARSING: Prevent crashes on malformed fares or distances
+                    fare_raw = str(slots.get("fare", "0"))
+                    fare_int = int(re.sub(r"[^\d]", "", fare_raw)) if fare_raw else 0
                     
-                    # ✅ MAP field names to match backend expectations (COMPLETE)
+                    dist_raw = slots.get("distance_km", 0)
+                    try:
+                        dist_float = float(dist_raw)
+                    except:
+                        dist_float = 25.0 # Fallback
+                        
+                    pax_int = int(str(slots.get("passengers", 1)).split('.')[0]) if slots.get("passengers") else 1
+                    lug_int = int(str(slots.get("luggage", 0)).split('.')[0]) if slots.get("luggage") else 0
+                    
                     pickup_datetime = slots.get("datetime", "")
-                    
-                    # ✅ AUTO-DETECT BOOKING TYPE (airport_transfer if flight info present)
                     booking_type = "airport_transfer" if slots.get("flight_type") else "point_to_point"
                     
                     payload = {
-                        "customer_name": slots.get("customer_name", "Customer"),  # ✅ Unified key
+                        "customer_name": slots.get("customer_name", "Customer"),
                         "customer_phone": ctx.get("caller_phone", "unknown"),
                         "pickup_location": slots.get("pickup", ""),
                         "dropoff_location": slots.get("dropoff", ""),
                         "fare_aed": fare_int,
-                        "fare": fare_int,  # ✅ Backend may expect "fare" not "fare_aed"
-                        "distance_km": float(slots.get("distance_km", 0)),  # ✅ ADD distance
+                        "fare": fare_int,
+                        "distance_km": dist_float,
                         "vehicle_type": slots.get("vehicle", "sedan"),
-                        "vehicle_model": slots.get("vehicle_model", ""),  # ✅ ADD vehicle model
-                        "booking_type": booking_type,  # ✅ airport_transfer or point_to_point
-                        "passengers_count": int(slots.get("passengers", 1)),
-                        "luggage_count": int(slots.get("luggage", 0)),
-                        "pickup_time": pickup_datetime,  # ✅ MAP pickup_datetime → pickup_time for backend
-                        "pickup_datetime": pickup_datetime,  # Keep for compatibility
-                        "notes": ctx.get("notes", ""),  # ✅ Already transliterated
-                        # ✅ NEW: Flight info fields (optional, only if airport transfer)
-                        "flight_type": slots.get("flight_type", None),  # arrival or departure
-                        "flight_time": slots.get("flight_time", None)  # ISO 8601 UTC datetime
+                        "vehicle_model": slots.get("vehicle_model", ""),
+                        "booking_type": booking_type,
+                        "passengers_count": pax_int,
+                        "luggage_count": lug_int,
+                        "pickup_time": pickup_datetime,
+                        "pickup_datetime": pickup_datetime,
+                        "notes": slots.get("notes", ""),  # ✅ FIX: was ctx.get("notes")
+                        "flight_type": slots.get("flight_type", None),
+                        "flight_time": slots.get("flight_time", None)
                     }
                     success = create_booking_direct(payload)
                     
@@ -4871,6 +4898,15 @@ def handle_call():
         lang = ctx.get("language", "en")
         voice_config = get_polly_voice(lang)
         
+        # ✅ SAFETY: Never say an empty response (prevents Twilio error)
+        if not response_text or len(response_text.strip()) == 0:
+            print("[VOICE] ⚠️ Empty response detected, using fallback", flush=True)
+            if ctx["flow_step"] == "customer_name": response_text = "I didn't catch that. What is your name?"
+            elif ctx["flow_step"] == "dropoff": response_text = "Where would you like to go?"
+            elif ctx["flow_step"] == "pickup": response_text = "And where should I pick you up from?"
+            elif ctx["flow_step"] == "luggage": response_text = "How many bags or luggage will you have?"
+            else: response_text = "Could you please say that again?"
+
         gather = resp.gather(
             input='speech',
             action=f"/handle?call_sid={call_sid}",
