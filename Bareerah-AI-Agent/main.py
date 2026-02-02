@@ -1446,15 +1446,14 @@ VEHICLE_INVENTORY = {
 }
 
 def call_suggest_vehicles_api(passengers: int, luggage: int, jwt_token: str):
-    """Call backend's /bookings/suggest-vehicles endpoint for best vehicle match"""
+    """Call backend's /bookings/suggest-vehicles endpoint for a list of valid vehicles"""
     try:
         result = backend_api("GET", f"/bookings/suggest-vehicles?passengers_count={passengers}&luggage_count={luggage}", jwt_token=jwt_token)
         if result and isinstance(result, list) and len(result) > 0:
-            best_vehicle = result[0]  # Best fit vehicle
-            return best_vehicle.get("type"), None
-        return None, "No suitable vehicles available"
+            return result, None # Return FULL LIST
+        return [], "No suitable vehicles available"
     except:
-        return None, "Failed to get vehicle suggestions"
+        return [], "Failed to get vehicle suggestions"
 
 def suggest_vehicle(passengers: int, luggage: int, jwt_token: str = None) -> tuple:
     """
@@ -1491,45 +1490,35 @@ def suggest_vehicle(passengers: int, luggage: int, jwt_token: str = None) -> tup
     
     # Try backend API first
     if jwt_token:
-        vehicle, error = call_suggest_vehicles_api(passengers, luggage, jwt_token)
-        if vehicle:
-            print(f"[VEHICLE] ✅ From Backend API: {vehicle}", flush=True)
-            return vehicle, None
+        options, error = call_suggest_vehicles_api(passengers, luggage, jwt_token)
+        if options and len(options) > 0:
+            print(f"[VEHICLE] ✅ From Backend API: Found {len(options)} options", flush=True)
+            return options[0].get("type"), options, None
     
-    print(f"[VEHICLE] Using local fallback logic...", flush=True)
     # Fallback to local logic if backend fails
+    fallback_options = []
     # Sedan: max 4 pax, 3 luggage
     if passengers <= 4 and luggage <= 3:
-        print(f"[VEHICLE] ✅ Selected SEDAN (local): {passengers}p ≤ 4, {luggage}l ≤ 3", flush=True)
-        return "sedan", None
+        fallback_options.append({"type": "sedan", "model": "Toyota Camry", "fare": "AED 120"})
     
     # SUV: max 6 pax, 6 luggage
     if passengers <= 6 and luggage <= 6:
-        print(f"[VEHICLE] ✅ Selected SUV (local): {passengers}p ≤ 6, {luggage}l ≤ 6", flush=True)
-        return "suv", None
+        fallback_options.append({"type": "suv", "model": "GMC Yukon", "fare": "AED 220"})
     
     # Luxury SUV: max 7 pax, 5 luggage
     if passengers <= 7 and luggage <= 5:
-        print(f"[VEHICLE] ✅ Selected LUXURY_SUV (local): {passengers}p ≤ 7, {luggage}l ≤ 5", flush=True)
-        return "luxury_suv", None
+        fallback_options.append({"type": "luxury_suv", "model": "Chevrolet Tahoe", "fare": "AED 250"})
     
     # Elite Van: max 7 pax, 7 luggage
     if passengers <= 7 and luggage <= 7:
-        print(f"[VEHICLE] ✅ Selected ELITE_VAN (local): {passengers}p ≤ 7, {luggage}l ≤ 7", flush=True)
-        return "elite_van", None
+        fallback_options.append({"type": "elite_van", "model": "Mercedes Viano", "fare": "AED 300"})
     
-    # Mini Bus: max 12 pax, 8 luggage
-    if passengers <= 12 and luggage <= 8:
-        print(f"[VEHICLE] ✅ Selected MINI_BUS (local): {passengers}p ≤ 12, {luggage}l ≤ 8", flush=True)
-        return "mini_bus", None
-    
-    # Bus: max 14 pax, 8 luggage
-    if passengers <= 14 and luggage <= 8:
-        print(f"[VEHICLE] ✅ Selected MINIBUS (local): {passengers}p ≤ 14, {luggage}l ≤ 8", flush=True)
-        return "minibus", None
+    if fallback_options:
+        print(f"[VEHICLE] ✅ Selected {fallback_options[0]['type']} (local fallback)", flush=True)
+        return fallback_options[0]["type"], fallback_options, None
     
     print(f"[VEHICLE] ❌ FAILED: {passengers}p and {luggage}l exceed all vehicle capacities", flush=True)
-    return None, "Passengers/luggage exceed maximum capacity"
+    return None, [], "Passengers/luggage exceed maximum capacity"
 
 def smart_detect_location_type(text: str) -> str:
     """
@@ -4428,24 +4417,34 @@ def handle_call():
             pax = ctx["locked_slots"].get("passengers", 1)
             lug = ctx["locked_slots"].get("luggage", 0)
             jwt_token = get_jwt_token()
-            vehicle, err = suggest_vehicle(pax, lug, jwt_token)
+            vehicle, options, err = suggest_vehicle(pax, lug, jwt_token)
             
             if vehicle:
                 ctx["locked_slots"]["vehicle"] = vehicle
                 pickup = ctx["locked_slots"].get("pickup", "")
                 dropoff = ctx["locked_slots"].get("dropoff", "")
-                distance_km = calculate_distance_google_maps(pickup, dropoff)
-                if not distance_km or distance_km <= 0:
-                    distance_km = 25
-                    print(f"[FARE] ⚠️ Google Maps failed, using fallback 25km", flush=True)
-                else:
-                    print(f"[FARE] ✅ Google Maps distance: {distance_km}km ({pickup} → {dropoff})", flush=True)
+                distance_km = calculate_distance_google_maps(pickup, dropoff) or 25
                 ctx["locked_slots"]["distance_km"] = distance_km
+                
+                # Fetch default fare for best fit
                 fare = calculate_fare_api(distance_km, vehicle, "point_to_point", jwt_token)
                 if not fare or fare <= 0:
                     fare = 50 + int(distance_km * 3.5) + (lug * 20)
                 ctx["locked_slots"]["fare"] = f"AED {int(fare)}"
                 ctx["flow_step"] = "confirm"
+                
+                # ✅ DYNAMIC CAR LIST FROM BACKEND
+                car_choices = []
+                for opt in options[:3]: # Show top 3
+                    model = opt.get("model") or opt.get("type").upper()
+                    # If backend gave fare, use it, else we use our calculated one (simplified for list)
+                    est_fare = opt.get("fare") or int(fare)
+                    car_choices.append(f"a {model} (AED {est_fare})")
+                
+                car_list_str = " or ".join(car_choices) if car_choices else "available cars"
+                best_model = options[0].get("model") or vehicle.upper()
+                
+                response_text = f"Perfect. We have several options available for you, including {car_list_str}. Based on your group of {pax}, I recommend the {best_model} for {ctx['locked_slots']['fare']}. Shall I book it?"
                 
                 # ✅ PROFESSIONAL: Include vehicle MODEL name (not just category)
                 vehicle_models = {
@@ -4482,7 +4481,7 @@ def handle_call():
             pax = ctx["locked_slots"].get("passengers", 1)
             lug = ctx["locked_slots"].get("luggage", 0)
             jwt_token = get_jwt_token()
-            vehicle, err = suggest_vehicle(pax, lug, jwt_token)
+            vehicle, options, err = suggest_vehicle(pax, lug, jwt_token)
             
             if vehicle:
                 ctx["locked_slots"]["vehicle"] = vehicle
@@ -4493,22 +4492,20 @@ def handle_call():
                 if not fare or fare <= 0:
                     fare = 50 + int(distance_km * 3.5) + (lug * 20)
                 ctx["locked_slots"]["fare"] = f"AED {int(fare)}"
-                # ✅ SHOW AVAILABLE CARS (User request: don't loop on one model)
-                pax = ctx["locked_slots"].get("passengers", 1)
-                lug = ctx["locked_slots"].get("luggage", 0)
                 
-                # Available car list based on capacity
-                options = []
-                if pax <= 4 and lug <= 3: options.append("a Lexus Sedan (AED 120)")
-                if pax <= 6 and lug <= 6: options.append("a GMC Yukon SUV (AED 220)")
-                if pax <= 7 and lug <= 7: options.append("a Toyota Previa Van (AED 250)")
+                # ✅ DYNAMIC CAR LIST FROM BACKEND
+                car_choices = []
+                for opt in options[:3]:
+                    model = opt.get("model") or opt.get("type").upper()
+                    item_fare = opt.get("fare") or int(fare)
+                    car_choices.append(f"a {model} (AED {item_fare})")
                 
-                car_list = " or ".join(options) if options else "a suitable vehicle"
-                ctx["locked_slots"]["vehicle"] = vehicle
+                car_list_str = " or ".join(car_choices) if car_choices else "available cars"
+                best_model = options[0].get("model") or vehicle.upper()
+                
                 ctx["flow_step"] = "confirm"
-                
-                response_text = f"Great. We have available cars like {car_list}. Based on your needs, I recommend the {vehicle_model} for {ctx['locked_slots']['fare']}. Should I proceed with the booking?"
-                print(f"[FLOW] ✅ VEHICLE+FARE (DESCRIPTIVE): {vehicle_model} | {ctx['locked_slots']['fare']}", flush=True)
+                response_text = f"Great. We have available cars like {car_list_str}. Based on your needs, I recommend the {best_model} for {ctx['locked_slots']['fare']}. Should I proceed with the booking?"
+                print(f"[FLOW] ✅ VEHICLE+FARE (DESCRIPTIVE): {best_model} | {ctx['locked_slots']['fare']}", flush=True)
             else:
                 response_text = "I'm looking for available cars. One moment please. Any specific car you prefer, like a Sedan or SUV?"
                 ctx["flow_step"] = "vehicle"
