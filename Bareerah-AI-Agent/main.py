@@ -3353,7 +3353,8 @@ TASK:
 1. Extract any mentioned info from: [dropoff, pickup, datetime, passengers, luggage, name].
 2. Generate a natural, polite response in {lang}. Acknowledge what they just said before asking for the next missing piece.
 3. IMPORTANT: DO NOT ask for anything listed in the BOOKING STATUS above.
-4. Suggest the next MISSING field as 'next_step'.
+4. If no slots are found (e.g. user says "Hello"), just greet them warmly and ask where they want to go.
+5. Suggest the next MISSING field as 'next_step'.
 
 Return ONLY this JSON:
 {{
@@ -3403,11 +3404,13 @@ ALWAYS return valid JSON."""
         }
         
     except Exception as e:
-        print(f"[NLU] ❌ Error: {str(e)}", flush=True)
+        import traceback
+        print(f"[NLU] ❌ CRITICAL ERROR: {str(e)}", flush=True)
+        traceback.print_exc()
         return {
             "extracted_value": "",
             "confidence": 0.0,
-            "response": "Sorry, could you repeat that?",
+            "response": "Hello, how can I help you?", # Default friendly fallback
             "next_step": flow_step
         }
 
