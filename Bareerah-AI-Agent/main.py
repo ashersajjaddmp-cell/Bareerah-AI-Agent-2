@@ -113,7 +113,7 @@ ARABIC_KEYWORDS = {"alhijra", "almarina", "masr", "ahal", "tayyib", "sahih", "al
 # ✅ MULTI-LANGUAGE TTS + STT: Voice and speech recognition mapping
 POLLY_VOICES = {
     "en": {"voice": "Polly.Joanna", "tts_lang": "en-US", "stt_lang": "en-US"},
-    "ur": {"voice": "Polly.Aditi", "tts_lang": "hi-IN", "stt_lang": "hi-IN"},  # Hindi closest to Urdu
+    "ur": {"voice": "Polly.Aditi", "tts_lang": "hi-IN", "stt_lang": "ur-PK"},  # ✅ Use ur-PK for better Urdu understanding
     "ar": {"voice": "Polly.Zeina", "tts_lang": "arb", "stt_lang": "ar-SA"}
 }
 
@@ -434,17 +434,7 @@ def detect_language_from_speech(text: str, current_language: str) -> str:
     
     return current_language
 
-def detect_gender_from_speech(text: str) -> str:
-    """✅ Basic gender detection from keywords (Sir/Ma'am/Bhai/Behen)"""
-    text_lower = text.lower()
-    male_keywords = ["sir", "mister", "mr", "bhai", "bhaiya", "uncle", "larka", "boy", "man"]
-    female_keywords = ["maam", "madam", "miss", "mrs", "behen", "api", "larki", "girl", "woman", "lady"]
-    
-    if any(k in text_lower for k in male_keywords):
-        return "male"
-    if any(k in text_lower for k in female_keywords):
-        return "female"
-    return "unknown"
+
 
 def convert_ogg_to_mp3(ogg_file_path: str) -> str:
     """✅ Convert .ogg/.opus file to .mp3 using ffmpeg for Whisper compatibility"""
@@ -4205,12 +4195,6 @@ def handle_call():
                 ctx["temp_name"] = name
                 ctx["flow_step"] = "name_confirm"
                 
-                # ✅ Detect Gender (Basic)
-                gender = detect_gender_from_speech(speech)
-                if gender != "unknown":
-                    ctx["locked_slots"]["gender"] = gender
-                    print(f"[GENDER] 🚻 Detected: {gender}", flush=True)
-
                 response_text = f"Just to confirm, is your name {name}?"
                 print(f"[FLOW] ⏳ NAME CAPTURED: {name} -> Asking confirmation", flush=True)
 
@@ -4222,10 +4206,14 @@ def handle_call():
             
             if not response_text: response_text = nlu.get("response", "What is your name?")
 
-        # ✅ STEP 5.6: CONFIRM NAME (User says Yes/No)
         elif ctx["flow_step"] == "name_confirm":
             low_text = speech.lower()
-            if any(w in low_text for w in ["yes", "yeah", "ji", "han", "haan", "correct", "right", "sahi"]):
+            speech_trans = transliterate_hindi_to_roman(speech).lower()
+            # Broaden confirmation words for Urdu/English
+            is_confirm = any(w in low_text for w in ["yes", "yeah", "yup", "ok", "okay", "ji", "han", "haan", "theek", "thik", "sahi", "bilkul", "correct", "right", "confirm"]) or \
+                         any(w in speech_trans for w in ["haan", "ji", "thik", "sahi", "bilkul", "karo", "han"])
+            
+            if is_confirm:
                 # Locked!
                 name = ctx.get("temp_name", "Customer")
                 ctx["locked_slots"]["customer_name"] = name
@@ -4410,11 +4398,11 @@ def handle_call():
             # ✅ MULTILINGUAL confirmation words (English + Urdu/Hindi transliteration + raw Hindi)
             confirm_words = {
                 # English
-                "yes", "yeah", "yup", "confirm", "ok", "okay", "book", "done", "sure", "please",
+                "yes", "yeah", "yup", "confirm", "ok", "okay", "book", "done", "sure", "please", "confirm it", "go ahead", "proceed", "that is fine", "it is ok", "it is fine",
                 # Urdu/Hindi transliteration
-                "haan", "theek", "bilkul", "jee", "bilkul theek", "acha",
+                "haan", "theek", "thik", "bilkul", "jee", "ji", "bilkul theek", "acha", "sahi", "shuru", "karo", "kar do", "confirm hai", "thik hai", "behtareen", "achhi hai", "kar dein", "kar dain", "haan bhai",
                 # Raw Hindi/Urdu script (from speech recognition)
-                "हाँ", "हान", "ठीक", "बिलकुल", "जी", "आचा", "ये", "येस", "यस", "हाँ", "जी हाँ"
+                "हाँ", "हान", "ठीक", "बिलकुल", "जी", "आचा", "ये", "येस", "यस", "जी हाँ", "सही है", "कर दो", "ठीक है"
             }
             reject_words = {"cancel", "restart", "start over", "different", "nahi"}
             positive_phrases = ["is good", "good enough", "fine", "sounds good", "that's good", "this is good", "works", "perfect", "great"]
@@ -4523,7 +4511,7 @@ def handle_call():
                 print(f"[FLOW] 🚗 UPGRADE REQUEST: Showing {len(luxury_fare_options)} luxury options", flush=True)
             
             # If customer says something positive like "is good", treat as confirmation
-            elif (has_positive_phrase or has_confirm_word) and not has_upgrade_request:
+            elif (has_positive_phrase or has_confirm_word):
                 # ✅ FIX: Create booking IMMEDIATELY (don't wait for next speech)
                 try:
                     slots = ctx.get("locked_slots", {})
