@@ -61,83 +61,15 @@ NOTIFICATION_EMAILS = [
     "aizaz.dmp@gmail.com"  # ✅ PRIMARY: Verified email for Resend testing mode
 ]
 
-# ✅ UPSELL ATTRACTIONS & PACKAGES
-DUBAI_ATTRACTIONS = [
-    "🏙️ Burj Khalifa - World's tallest building with 360° views",
-    "🏜️ Desert Safari - Dunes, camel ride, BBQ dinner",
-    "🛍️ Dubai Mall - Shopping paradise with 1,200+ stores",
-    "🎡 Ain Dubai - Giant observation wheel (Ferris wheel)",
-    "🏖️ Jumeirah Beach - Pristine white sand & luxury resorts",
-    "🕌 Sheikh Mohammed Centre - Stunning Islamic architecture"
-]
+# ✅ Detect if location is an airport
+def is_airport_location(location_text):
+    if not location_text: return False
+    text_lower = location_text.lower()
+    return any(kw in text_lower for kw in ["airport", "terminal", "dxb", "dwc", "auh", "flight"])
 
-PACKAGE_OPTIONS = {
-    "city_tour": "Dubai City Tour (3-4 hours) - Landmarks, photos, lunch included",
-    "dinner": "Dinner Package - Restaurant booking + transport",
-    "shopping": "Shopping Tour - Multiple malls + waiting time",
-    "airport": "Airport Transfer - On-time, professional, luggage assistance",
-    "vip": "VIP Package - Premium vehicle + refreshments + city guide"
-}
-
-# ✅ COST + SPEED OPTIMIZATION: Production mode flag
-PRODUCTION_MODE = os.environ.get("PRODUCTION_MODE", "true").lower() == "true"
-DEBUG_LOGGING = os.environ.get("DEBUG_LOGGING", "false").lower() == "true"
-
-os.makedirs('public', exist_ok=True)
-
-db_pool = None
-_tts_prewarmed = False
-_cleanup_started = False  # ✅ Flag to ensure cleanup only starts ONCE
-call_contexts = {}
-call_timestamps = {}  # ✅ Track when calls come in (for fallback email if webhook fails)
-offline_bookings = []
-utterance_count = {}  # Track utterance count per call for language detection
-slot_retry_count = {}  # ✅ Track slot retry attempts (max 2)
-consecutive_failures = {}  # ✅ Track consecutive fatal failures (max 2)
-
-# ✅ Pre-generated static TTS cache (line 26-27)
-STATIC_TTS_CACHE = {
-    "greeting": None,
-    "hold_message": None,
-    "no_speech": None,
-    "confirm_pickup": None,
-    "confirm_dropoff": None
-}
-
-EMAIL_REGEX = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
-
-# ✅ STT LANGUAGE DETECTION: Keywords for Urdu/Arabic
-URDU_KEYWORDS = {"meri", "mera", "mein", "hoon", "hain", "malik", "sahab", "acha", "theek", "bilkul", "kahan", "jana", "chalo", "karo", "ruko", "subah", "shaam", "kal", "aaj", "abhi", "jee", "naam"}
-ARABIC_KEYWORDS = {"alhijra", "almarina", "masr", "ahal", "tayyib", "sahih", "almaer", "hawaya", "aiwa", "naam", "shukran", "marhaba", "ahlan", "yalla", "bukra", "alyawm", "sabah", "masa"}
-
-# ✅ MULTI-LANGUAGE TTS + STT: Voice and speech recognition mapping
-POLLY_VOICES = {
-    "en": {"voice": "Polly.Joanna", "tts_lang": "en-US", "stt_lang": "en-US"},
-    "ur": {"voice": "Polly.Aditi", "tts_lang": "hi-IN", "stt_lang": "ur-PK"},  # ✅ Use ur-PK for better Urdu understanding
-    "ar": {"voice": "Polly.Zeina", "tts_lang": "arb", "stt_lang": "ar-SA"}
-}
-
-# ✅ HINDI/URDU TO ROMAN TRANSLITERATION MAPPING
-HINDI_URDU_TRANSLITERATION = {
-    # Hindi vowels
-    'अ': 'a', 'आ': 'aa', 'इ': 'i', 'ई': 'ee', 'उ': 'u', 'ऊ': 'oo',
-    'ऋ': 'ri', 'ए': 'e', 'ऐ': 'ai', 'ओ': 'o', 'औ': 'au',
-    # Hindi consonants
-    'क': 'k', 'ख': 'kh', 'ग': 'g', 'घ': 'gh', 'ङ': 'ng',
-    'च': 'ch', 'छ': 'chh', 'ज': 'j', 'झ': 'jh', 'ञ': 'ny',
-    'ट': 't', 'ठ': 'th', 'ड': 'd', 'ढ': 'dh', 'ण': 'n',
-    'त': 't', 'थ': 'th', 'द': 'd', 'ध': 'dh', 'न': 'n',
-    'प': 'p', 'फ': 'ph', 'ब': 'b', 'भ': 'bh', 'म': 'm',
-    'य': 'y', 'र': 'r', 'ल': 'l', 'व': 'w', 'श': 'sh', 'ष': 'sh',
-    'स': 's', 'ह': 'h',
-    # Special
-    'ः': 'h', 'ँ': 'n', 'ं': 'n', 'ः': ':',
-    # Hindi diacritics (halant removes the inherent 'a')
-    '्': '',
-    # Numbers
-    '०': '0', '१': '1', '२': '2', '३': '3', '४': '4', '५': '5',
-    '६': '6', '७': '7', '८': '8', '९': '9',
-}
+def transliterate_hindi_to_roman(text):
+    """Simple passthrough for logs (removing bloat)"""
+    return text
 
 def is_airport_location(location_text):
     """✅ Detect if location is an airport (Dubai International, Al Maktoum, etc)"""
@@ -2174,44 +2106,40 @@ def send_email_notification(subject: str, body: str, booking_data: dict = None, 
         
         return False
 
-def notify_booking_to_team(booking_data: dict, status: str = "created"):
-    """✅ Send async notification to team about booking - WITH PROPER THREADING"""
+def finalize_and_notify_booking(locked_slots, customer_phone, status="created"):
+    """✅ THE CORE WORKFLOW: Fixes Mapping Bugs & Shoots Backend + Email"""
     try:
-        subject_map = {
-            "created": "✅ New Booking Confirmed - Star Skyline",
-            "pending": "⏳ Pending Booking (Backend Down) - Star Skyline",
-            "failed": "❌ Booking Failed - Customer May Not Have Confirmed",
-            "dropped": "📞 Call Dropped - Customer May Need Follow-up",
-            "partial_info": "⚠️ Partial Booking Data Collected - Customer May Need Follow-up",
-            "location_failed": "🚨 MISSED LEAD - Pickup Location Issue - Star Skyline",
-            "short_call": "📞 MISSED CALL / Short Interaction - Star Skyline"
+        # 1. Clean Map (Ensures Email and Backend get the right data)
+        clean_data = {
+            "customer_name": locked_slots.get("customer_name", "Valuable Customer"),
+            "customer_phone": customer_phone,
+            "pickup_location": locked_slots.get("pickup", "TBD"),
+            "dropoff_location": locked_slots.get("dropoff", "TBD"),
+            "passengers_count": locked_slots.get("passengers", 1),
+            "luggage_count": locked_slots.get("luggage", 0),
+            "pickup_time": locked_slots.get("datetime", "Stat"),
+            "datetime": locked_slots.get("datetime", "Stat"), # Duplicate for legacy template
+            "fare": str(locked_slots.get("fare", "AED 0")),
+            "calculated_fare_aed": str(locked_slots.get("fare", "0")).replace("AED", "").strip(),
+            "vehicle_type": locked_slots.get("vehicle", "SUV"),
+            "car_model": locked_slots.get("vehicle_model", "Luxury Vehicle"),
+            "vehicle_model": locked_slots.get("vehicle_model", "Luxury Vehicle"), # Legacy
+            "booking_reference": f"BOK-{customer_phone[-4:]}-{int(time.time() % 1000)}",
+            "notes": f"Car Preference: {locked_slots.get('preferred_vehicle', 'Any')}"
         }
+
+        # 2. Shoot Backend
+        backend_success = create_booking_direct(clean_data)
         
-        body_map = {
-            "created": f"🎉 Booking successfully created and confirmed by customer!",
-            "pending": f"⚠️ Booking saved locally - Backend was unavailable. Please sync when backend is online.",
-            "failed": f"❌ Booking creation failed. Customer needs manual follow-up.",
-            "dropped": f"📞 Customer call dropped mid-conversation. Please follow up immediately!",
-            "partial_info": f"⚠️ Customer provided some booking details but didn't complete the full booking. Follow up with them!",
-            "location_failed": f"🚨 URGENT: Customer called but could not provide a valid pickup location after 3 attempts. PLEASE CALL THEM BACK IMMEDIATELY!",
-            "short_call": f"📞 Customer called but hung up quickly (wait time < 30s). No valid booking data captured. Please call back!"
-        }
+        # 3. Shoot Email
+        subject = "🎉 New Booking Confirmed!" if backend_success else "⚠️ Booking Captured (Pending Sync)"
+        send_email_notification(subject, "Booking received from AI Agent", clean_data)
         
-        subject = subject_map.get(status, f"Booking Notification ({status})")
-        body = body_map.get(status, "New booking notification")
-        
-        # ✅ FIX: Send email with NON-DAEMON thread (waits for completion) + explicit logging
-        def send_email_thread():
-            result = send_email_notification(subject, body, booking_data)
-            if not result:
-                print(f"[NOTIFY] ⚠️ Email thread completed but send failed for status: {status}", flush=True)
-        
-        thread = threading.Thread(target=send_email_thread, daemon=False)  # ✅ NOT daemon - ensures email sends before shutdown
-        thread.start()
-        
-        print(f"[NOTIFY] Email thread started (non-daemon) for status: {status}", flush=True)
+        print(f"[COMPLETE] ✅ Workflow finished. Backend: {backend_success}", flush=True)
+        return backend_success
     except Exception as e:
-        print(f"[NOTIFY] ❌ Notification error: {e}", flush=True)
+        print(f"[COMPLETE] ❌ Workflow Error: {e}", flush=True)
+        return False
 
 def send_whatsapp_text_message(to_phone: str, text: str) -> bool:
     """✅ Send text message reply via WhatsApp using Twilio API"""
@@ -3609,38 +3537,13 @@ def extract_nlu_clean(text, flow_step, locked_slots, lang="en"):
         dubai_tz = timezone(timedelta(hours=4))
         today_dubai = datetime.now(dubai_tz).strftime('%Y-%m-%d')
         
-        # ✅ LOCATION FALLBACK DICTIONARY (120+ Dubai locations)
+        # ✅ LOCATION FALLBACK DICTIONARY (Lean Core Set)
         POPULAR_DUBAI_LOCATIONS = {
-            "dubai airport": "Dubai International Airport", "dubai international": "Dubai International Airport",
-            "international airport": "Dubai International Airport", "dxb": "Dubai International Airport",
-            "al maktoum": "Al Maktoum International Airport", "zabeel park": "Zabeel Park", "zabeel": "Zabeel Park",
-            "creek park": "Dubai Creek Park", "safa park": "Safa Park", "marina mall": "Dubai Marina Mall",
-            "dubai mall": "The Dubai Mall", "mall of the emirates": "Mall of the Emirates",
-            "burj khalifa": "Burj Khalifa", "burj": "Burj Khalifa", "emirates tower": "Emirates Towers",
-            "downtown dubai": "Downtown Dubai", "burj al arab": "Burj Al Arab", "jumeirah": "Jumeirah",
-            "dubai marina": "Dubai Marina", "jbr": "JBR - Jumeirah Beach Residence",
-            "atlantis": "Atlantis The Palm", "wild wadi": "Wild Wadi Waterpark",
-            "deira city centre": "Deira City Centre", "city centre": "Deira City Centre",
-            "legoland": "Legoland Dubai", "global village": "Global Village",
-            "expo city": "Expo City Dubai", "sheikh zayed road": "Sheikh Zayed Road",
-            "al barsha": "Al Barsha", "business bay": "Business Bay", "deira": "Deira",
-            "bur dubai": "Bur Dubai", "karama": "Al Karama", "jlt": "Jumeirah Lakes Towers",
-            "jw marriott": "JW Marriott Marquis Hotel Dubai", "marquis": "JW Marriott Marquis Hotel Dubai",
-            "marriott marquis": "JW Marriott Marquis Hotel Dubai", "paramount": "Paramount Hotel Dubai",
-            "address boulevard": "Address Boulevard", "address sky view": "Address Sky View",
-            "address fontaine": "Address Downtown", "address mall": "Address Dubai Mall",
-            "palazzo versace": "Palazzo Versace Dubai", "armani hotel": "Armani Hotel Dubai",
-            "five palm": "FIVE Palm Jumeirah Hotel", "five village": "FIVE Jumeirah Village",
-            "goyal": "Goya Dubai", "hilton marina": "Hilton Dubai Jumeirah",
-            "sofitel": "Sofitel Dubai The Obelisk", "raffles": "Raffles Dubai",
-            "movers": "Movenpick Hotel", "marriott jbr": "Marriott Resort Palm Jumeirah",
-            "pullman": "Pullman Dubai Downtown", "four seasons": "Four Seasons Resort Dubai",
-            "taj dubai": "Taj Dubai", "oberoi": "The Oberoi Dubai",
-            "dubai opera": "Dubai Opera", "frame": "Dubai Frame", "museum of future": "Museum of the Future",
-            "la mer": "La Mer Dubai", "kite beach": "Kite Beach", "city walk": "City Walk Dubai",
-            "festival city": "Dubai Festival City", "dragon mart": "Dragon Mart Dubai",
-            "outlet mall": "Dubai Outlet Mall", "ibn battuta": "Ibn Battuta Mall",
-            "gold souq": "Dubai Gold Souk", "spice souq": "Dubai Spice Souk",
+            "dubai airport": "Dubai International Airport", "dxb": "Dubai International Airport",
+            "dubai mall": "The Dubai Mall", "marina mall": "Dubai Marina Mall",
+            "marina": "Dubai Marina", "jbr": "Jumeirah Beach Residence",
+            "atlantis": "Atlantis The Palm", "burj khalifa": "Burj Khalifa",
+            "mall of the emirates": "Mall of the Emirates", "downtown": "Downtown Dubai"
         }
         
         # Map flow_step to context for GPT-4o
@@ -4541,107 +4444,28 @@ def handle_call():
                 
                 print(f"[FLOW] 🚗 UPGRADE REQUEST: Showing {len(luxury_fare_options)} luxury options", flush=True)
             
-            # If customer says something positive like "is good", treat as confirmation
+            # If customer confirms
             elif (has_positive_phrase or has_confirm_word):
-                # ✅ FIX: Create booking IMMEDIATELY (don't wait for next speech)
-                try:
-                    slots = ctx.get("locked_slots", {})
-                    # ✅ SAFE PARSING: Prevent crashes on malformed fares or distances
-                    fare_raw = str(slots.get("fare", "0"))
-                    fare_int = int(re.sub(r"[^\d]", "", fare_raw)) if fare_raw else 0
-                    
-                    dist_raw = slots.get("distance_km", 0)
-                    try:
-                        dist_float = float(dist_raw)
-                    except:
-                        dist_float = 25.0 # Fallback
-                        
-                    pax_int = int(str(slots.get("passengers", 1)).split('.')[0]) if slots.get("passengers") else 1
-                    lug_int = int(str(slots.get("luggage", 0)).split('.')[0]) if slots.get("luggage") else 0
-                    
-                    pickup_datetime = slots.get("datetime", "")
-                    booking_type = "airport_transfer" if slots.get("flight_type") else "point_to_point"
-                    
-                    payload = {
-                        "customer_name": slots.get("customer_name", "Customer"),
-                        "customer_phone": ctx.get("caller_phone", "unknown"),
-                        "pickup_location": slots.get("pickup", ""),
-                        "dropoff_location": slots.get("dropoff", ""),
-                        "fare_aed": fare_int,
-                        "fare": fare_int,
-                        "distance_km": dist_float,
-                        "vehicle_type": slots.get("vehicle", "sedan"),
-                        "vehicle_model": slots.get("vehicle_model", ""),
-                        "booking_type": booking_type,
-                        "passengers_count": pax_int,
-                        "luggage_count": lug_int,
-                        "pickup_time": pickup_datetime,
-                        "pickup_datetime": pickup_datetime,
-                        "notes": slots.get("notes", ""),  # ✅ FIX: was ctx.get("notes")
-                        "flight_type": slots.get("flight_type", None),
-                        "flight_time": slots.get("flight_time", None)
-                    }
-                    success = create_booking_direct(payload)
-                    
-                    # ✅ SAVE LOCALLY ALWAYS (Req #6: Data Persistence)
-                    save_booking_locally(payload, status="confirmed" if success else "pending_confirmation")
-                    
-                    # ✅ DYNAMIC BOOKING CONFIRMATION
-                    confirm_nlu = extract_nlu_clean("", "booking_confirmed", ctx["locked_slots"], current_lang)
-                    response_text = confirm_nlu.get("response") or "Your ride is confirmed! Driver will call you shortly. Thank you!"
-                    
-                    print(f"[BOOKING] ✅ CREATED: {payload}", flush=True)
-                    
-                    # ✅ SEND CONFIRMATION EMAIL even if backend fails (capture lead)
-                    try:
-                        email_data = {
-                            "customer_name": payload.get("customer_name", "Customer"),
-                            "customer_phone": payload.get("customer_phone"),
-                            "customer_email": ctx.get("customer_email", ""),  # ✅ Email if available
-                            "pickup_location": payload.get("pickup_location"),
-                            "dropoff_location": payload.get("dropoff_location"),
-                            "passengers_count": payload.get("passengers_count"),  # ✅ Use correct key
-                            "passengers": payload.get("passengers_count"),  # ✅ Fallback for template
-                            "luggage_count": payload.get("luggage_count"),  # ✅ Use correct key
-                            "luggage": payload.get("luggage_count"),  # ✅ Fallback for template
-                            "calculated_fare_aed": payload.get("fare_aed"),  # ✅ Use correct key
-                            "fare": f"AED {payload.get('fare_aed')}",  # ✅ Fallback
-                            "vehicle_type": payload.get("vehicle_type"),  # ✅ Use correct key
-                            "vehicle": payload.get("vehicle_type"),  # ✅ Fallback
-                            "vehicle_model": payload.get("vehicle_model", ""),  # ✅ ADD vehicle model
-                            "datetime": payload.get("pickup_datetime"),  # ✅ Pickup time
-                            "notes": payload.get("notes", ""),  # ✅ Add notes
-                            "booking_reference": f"BOOK-{payload.get('customer_phone', 'XXXX').replace('+', '').replace(' ', '')[-4:].upper()}"  # ✅ Generate temp ref
-                        }
-                        notify_booking_to_team(email_data, status="created" if success else "pending")
-                        print(f"[EMAIL] ✅ Booking confirmation sent to team", flush=True)
-                    except Exception as email_err:
-                        print(f"[EMAIL] ⚠️ Failed to send confirmation email: {email_err}", flush=True)
-                    
-                    # DB CLEANUP: Log call BEFORE deleting session
-                    log_completed_call(call_sid, ctx)  # ✅ Log to call_logs table
-                    delete_call_state(call_sid)
-                    if call_sid in call_contexts:
-                        del call_contexts[call_sid]
-                    
-                    resp = VoiceResponse()
-                    # ✅ Use multilingual voice for final confirmation
-                    voice_config = get_polly_voice(current_lang)
-                    resp.say(response_text, voice=voice_config["voice"], language=voice_config.get("tts_lang", "en-US"))
-                    resp.hangup()
-                    return str(resp)
-                except Exception as e:
-                    print(f"[BOOKING] ❌ ERROR: {e}", flush=True)
-                    error_msg = "Booking error. Our team will call you back shortly."
-                    if current_lang == "ur":
-                        error_msg = "Booking mein error aya. Hamara team aapko callback karega."
-                    elif current_lang == "ar":
-                        error_msg = "Khata fil hajz. Siyatsiluk fareek."
-                    resp = VoiceResponse()
-                    voice_config = get_polly_voice(current_lang)
-                    resp.say(error_msg, voice=voice_config["voice"], language=voice_config.get("tts_lang", "en-US"))
-                    resp.hangup()
-                    return str(resp)
+                success = finalize_and_notify_booking(ctx["locked_slots"], ctx.get("caller_phone", "unknown"))
+                
+                # Dynamic Response
+                confirm_nlu = extract_nlu_clean("", "booking_confirmed", ctx["locked_slots"], current_lang)
+                response_text = confirm_nlu.get("response") or "Perfect. Your booking is confirmed! Thank you."
+                
+                # Cleanup and Hangup
+                log_completed_call(call_sid, ctx)
+                delete_call_state(call_sid)
+                if call_sid in call_contexts: del call_contexts[call_sid]
+                
+                resp = VoiceResponse()
+                voice_config = get_polly_voice(current_lang)
+                resp.say(response_text, voice=voice_config["voice"], language=voice_config.get("tts_lang", "en-US"))
+                resp.hangup()
+                return str(resp)
+
+            elif has_reject_word and not has_positive_phrase:
+                response_text = "I understand. What would you like to update? Your location or the time?"
+                ctx["flow_step"] = "confirm"
             elif has_reject_word and not has_positive_phrase:
                 response_text = "I understand. What would you like to change? Your pickup, dropoff, or time?"
                 ctx["flow_step"] = "confirm" # Stay in confirm but wait for correction
@@ -4698,47 +4522,19 @@ def handle_call():
             response_text = "Sorry, something went wrong. Let's start over. Where would you like to go?"
             ctx["flow_step"] = "dropoff"
         
-        # ✅ MISSION CRITICAL: FINAL SYNC GUARD (Fixes all loops)
-        # If flow_step moved forward but response is still sticking to old step keywords, REGENERATE.
-        low_resp = response_text.lower()
-        if ctx["flow_step"] == "luggage" and any(w in low_resp for w in ["name", "ali", "john", "who", "confirm", "speaking"]):
-             response_text = "Got it. How many bags or luggage will you have with you?"
-        elif ctx["flow_step"] == "datetime" and any(w in low_resp for w in ["pickup", "from", "where"]):
-             response_text = "Okay. And at what time do you need the ride?"
-        elif ctx["flow_step"] == "passengers" and any(w in low_resp for w in ["time", "when", "o'clock", "date"]):
-             response_text = "Perfect. How many passengers will be travelling?"
-        
-        # Multilingual sync (Urdu/Arabic Fallbacks)
-        if current_lang == "ur":
-            if ctx["flow_step"] == "luggage" and "bags" not in low_resp and "luggage" not in low_resp:
-                response_text = "Theek hai. Kitne bags honge aapke paas?"
-        elif current_lang == "ar":
-            if ctx["flow_step"] == "luggage" and "حقيبة" not in response_text and "bags" not in low_resp:
-                response_text = "تمام. كم حقيبة معك؟"
-
-        # ✅ LOG BAREERAH RESPONSE
+        # ✅ FINAL STATUS LOG
         print(f"[BAREERAH] 🎤 {response_text} (Target Step: {ctx['flow_step']})", flush=True)
 
-        
-        # ✅ DB-BACKED: Save state to PostgreSQL (crash-safe)
         save_call_state(call_sid, ctx)
-        call_contexts[call_sid] = ctx
         
-        # ✅ BARGE-IN ENABLED: Nest Say INSIDE Gather so customer can interrupt
+        # ✅ VOICE RESPONSE (Gather + Say)
         resp = VoiceResponse()
-        
-        # ✅ MULTI-LANGUAGE TTS + STT: Use detected language for both voice AND speech recognition
         lang = ctx.get("language", "en")
         voice_config = get_polly_voice(lang)
         
-        # ✅ SAFETY: Never say an empty response (prevents Twilio error)
-        if not response_text or len(response_text.strip()) == 0:
-            print("[VOICE] ⚠️ Empty response detected, using fallback", flush=True)
-            if ctx["flow_step"] == "customer_name": response_text = "I didn't catch that. What is your name?"
-            elif ctx["flow_step"] == "dropoff": response_text = "Where would you like to go?"
-            elif ctx["flow_step"] == "pickup": response_text = "And where should I pick you up from?"
-            elif ctx["flow_step"] == "luggage": response_text = "How many bags or luggage will you have?"
-            else: response_text = "Could you please say that again?"
+        # Guard against blank responses
+        if not response_text:
+            response_text = "I'm sorry, could you please repeat that?"
 
         gather = resp.gather(
             input='speech',
@@ -4746,10 +4542,11 @@ def handle_call():
             timeout=30,
             speech_timeout='auto',
             enhanced=True,
-            language=voice_config.get("stt_lang", "en-US")  # ✅ STT language for Urdu/Arabic
+            language=voice_config.get("stt_lang", "en-US")
         )
         gather.say(response_text, voice=voice_config["voice"], language=voice_config.get("tts_lang", "en-US"))
         return str(resp)
+
     
     except Exception as e:
         # ✅ CATCH ANY UNHANDLED EXCEPTION - NO MORE "application error"
