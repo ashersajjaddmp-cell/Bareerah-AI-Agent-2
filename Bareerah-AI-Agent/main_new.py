@@ -170,34 +170,58 @@ Return JSON ONLY:
 # ✅ Twilio Routes
 @app.route('/incoming', methods=['POST'])
 def incoming():
-    resp = VoiceResponse()
-    call_sid = request.values.get('CallSid')
-    
-    # Initialize State
-    initial_state = {
-        "flow_step": "customer_name",
-        "locked_slots": {},
-        "language": "en"
-    }
-    save_state(call_sid, initial_state)
-    
-    gather = resp.gather(input='speech', action='/handle_new', timeout=3, enhanced=True)
-    gather.say("Welcome to Star Skyline Limousine. May I have your name please?", voice="Polly.Aditi")
-    
-    return str(resp)
+    try:
+        resp = VoiceResponse()
+        call_sid = request.values.get('CallSid')
+        print(f"📞 Incoming Call: {call_sid}", flush=True)
+        
+        # Initialize State
+        initial_state = {
+            "flow_step": "customer_name",
+            "locked_slots": {},
+            "language": "en"
+        }
+        try:
+            save_state(call_sid, initial_state)
+        except Exception as e:
+            print(f"❌ DB ERROR in incoming: {e}", flush=True)
+            # Fallback for DB failure - still answer the call
+            pass
+        
+        gather = resp.gather(input='speech', action='/handle_new', timeout=3, enhanced=True)
+        gather.say("Welcome to Star Skyline Limousine. May I have your name please?", voice="Polly.Aditi")
+        
+        return str(resp)
+    except Exception as e:
+        print(f"🔥 CRITICAL ERROR in incoming: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        resp = VoiceResponse()
+        resp.say("I am having technical difficulties. Please call back later.")
+        return str(resp)
 
 @app.route('/handle_new', methods=['POST'])
 def handle_new():
-    call_sid = request.values.get('CallSid')
-    speech = request.values.get('SpeechResult', '')
-    
-    if not speech:
-        resp = VoiceResponse()
-        gather = resp.gather(input='speech', action='/handle_new', timeout=3)
-        gather.say("I'm sorry, I didn't catch that. Could you repeat?")
-        return str(resp)
+    try:
+        call_sid = request.values.get('CallSid')
+        speech = request.values.get('SpeechResult', '')
+        print(f"🗣️ Speech: {speech} | SID: {call_sid}", flush=True)
+        
+        if not speech:
+            resp = VoiceResponse()
+            gather = resp.gather(input='speech', action='/handle_new', timeout=3)
+            gather.say("I'm sorry, I didn't catch that. Could you repeat?")
+            return str(resp)
 
-    state = load_state(call_sid)
+        try:
+            state = load_state(call_sid)
+        except Exception as e:
+            print(f"❌ DB ERROR load_state: {e}", flush=True)
+            state = None
+            
+        if not state:
+            # Fallback state if DB failed
+            state = {"flow_step": "customer_name", "locked_slots": {}, "language": "en"}
     if not state:
         return str(VoiceResponse().hangup())
 
@@ -297,6 +321,13 @@ def handle_new():
     
     save_state(call_sid, state)
     return str(resp)
+    except Exception as e:
+        print(f"🔥 CRITICAL ERROR in handle_new: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        resp = VoiceResponse()
+        resp.say("I am having technical difficulties. Please say that again.")
+        return str(resp)
 
 if __name__ == '__main__':
     print("🚀 Force Redeploy Triggered: v2.1 Live (Hardened)", flush=True)
