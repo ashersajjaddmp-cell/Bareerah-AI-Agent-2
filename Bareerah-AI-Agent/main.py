@@ -58,7 +58,7 @@ RESEND_EMAIL = "noreply@resend.dev"  # ✅ FIX: Use verified Resend domain inste
 # ✅ TEAM NOTIFICATION EMAILS - Using ONLY verified email (Resend restriction in testing mode)
 # NOTE: Resend requires domain verification to send to multiple emails. For now, send to primary only.
 NOTIFICATION_EMAILS = [
-    "aizaz.dmp@gmail.com"  # ✅ PRIMARY: Verified email for Resend testing mode
+    "ashersajjad.dmp@gmail.com"  # ✅ PRIMARY: Verified email for Resend testing mode
 ]
 
 # ✅ Detect if location is an airport
