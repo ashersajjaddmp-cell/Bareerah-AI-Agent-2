@@ -299,5 +299,5 @@ def handle_new():
     return str(resp)
 
 if __name__ == '__main__':
-    print("🚀 Force Redeploy Triggered: v2.0 Live", flush=True)
+    print("🚀 Force Redeploy Triggered: v2.1 Live (Hardened)", flush=True)
     app.run(host='0.0.0.0', port=5001, debug=True)
