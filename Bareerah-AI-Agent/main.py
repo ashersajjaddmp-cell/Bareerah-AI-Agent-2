@@ -30,13 +30,29 @@ CACHED_TOKEN = None
 def get_token():
     global CACHED_TOKEN
     if CACHED_TOKEN: return CACHED_TOKEN
-    try:
-        url = f"{BACKEND_BASE_URL}/api/auth/login"
-        resp = requests.post(url, json={"username":"admin","password":"admin123"}, timeout=5)
-        if resp.status_code == 200:
-            CACHED_TOKEN = resp.json().get("token")
-            return CACHED_TOKEN
-    except: pass
+    
+    # Try multiple credential sets to be safe
+    creds = [
+        {"username": "admin", "password": "admin123"},
+        {"email": "admin@starskylimo.com", "password": "password123"}
+    ]
+    
+    for c in creds:
+        try:
+            url = f"{BACKEND_BASE_URL}/api/auth/login"
+            # Some backends expect 'username', some 'email'
+            payload = {"password": c["password"]}
+            if "username" in c: payload["username"] = c["username"]
+            if "email" in c: payload["email"] = c["email"]
+            
+            resp = requests.post(url, json=payload, timeout=5)
+            if resp.status_code == 200:
+                CACHED_TOKEN = resp.json().get("token")
+                print(f"✅ Auth Success with: {c.get('username') or c.get('email')}")
+                return CACHED_TOKEN
+        except: pass
+    
+    print("❌ All Auth attempts failed")
     return None
 
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -96,14 +112,20 @@ def resolve_address(addr):
 
 def calc_dist(p, d):
     """Google Distance Matrix via Requests"""
-    if not GOOGLE_MAPS_API_KEY: return 20.0
+    if not GOOGLE_MAPS_API_KEY: 
+        print("⚠️ No Google Maps Key. Defaulting to 20km.")
+        return 20.0
     try:
         url = "https://maps.googleapis.com/maps/api/distancematrix/json"
         params = {"origins": p, "destinations": d, "mode": "driving", "key": GOOGLE_MAPS_API_KEY}
         res = requests.get(url, params=params, timeout=5).json()
+        print(f"🗺️ Maps Status: {res.get('status')} | Elements: {res.get('rows', [{}])[0].get('elements', [{}])[0].get('status') if res.get('rows') else 'N/A'}")
         if res.get("rows") and res["rows"][0]["elements"][0]["status"] == "OK":
-            return res["rows"][0]["elements"][0]["distance"]["value"] / 1000.0
-    except: pass
+            dist = res["rows"][0]["elements"][0]["distance"]["value"] / 1000.0
+            print(f"🗺️ Distance Calculated: {dist} km")
+            return dist
+    except Exception as e: 
+        print(f"❌ Maps Error: {e}")
     return 20.0
 
 def send_email(subject, body):
@@ -146,10 +168,12 @@ def calculate_backend_fare(dist_km, v_type, b_type="point_to_point"):
         }
         print(f"💰 Fetching Fare: {url} -> {data}")
         resp = requests.post(url, json=data, headers=headers, timeout=5)
-        if resp.status_code == 200:
+        if resp.status_code in [200, 201]:
             fare = resp.json().get("fare_aed")
-            print(f"💰 Fare Received: {fare}")
-            return fare
+            if fare is not None:
+                print(f"💰 Fare Received: {fare}")
+                return fare
+        print(f"⚠️ Fare API returned {resp.status_code}: {resp.text}")
     except Exception as e:
         print(f"❌ Fare API Error: {e}")
     return None
@@ -314,21 +338,24 @@ def handle_call():
             # Use list slicing safely
             for v in options[:2]:
                 if not isinstance(v, dict): continue
-                # Use vehicle_type as primary key from suggest API
-                v_type = v.get('vehicle_type', v.get('type', 'SEDAN')).upper()
-                v_model = v.get('vehicle_type', v.get('model', 'Car')).replace("_", " ").title()
+                # The 'suggest-vehicles' API uses 'vehicle_type', regular API uses 'type'
+                v_type = v.get('vehicle_type', v.get('type', v.get('category', 'SEDAN'))).upper()
+                v_model = v.get('vehicle_type', v.get('model', v.get('vehicle', 'Car'))).replace("_", " ").title()
                 
                 # Get Perfect Fare from Backend
                 price = calculate_backend_fare(base_dist, v_type, b_type)
                 if not price:
-                    # Fallback to local calculation
-                    price = int(v.get('base_price', 50) + (base_dist * v.get('rate_per_km', 3.5)))
+                    # Fallback to backend-provided base/rate if available
+                    if v.get('base_fare'):
+                         price = int(float(v['base_fare']) + (base_dist * float(v.get('per_km_rate', 1))))
+                    else:
+                         price = int(v.get('base_price', 50) + (base_dist * v.get('rate_per_km', 3.5)))
                 
-                pitch += f"A {v_model} is {price} Dirhams. "
+                pitch += f"A {v_model} for this {base_dist} kilometer journey is {price} Dirhams. "
             pitch += "Which one would you like to book?"
         else:
             # Fallback Pitch (Using Backend Fare API even for hardcoded types)
-            logging.info("🚕 Using Fallback hardcoded vehicle options")
+            logging.info("🚕 No suitable cars found in API, using fallback logic.")
             sedan_fare = calculate_backend_fare(base_dist, "SEDAN") or int(50 + (base_dist * 3.5))
             suv_fare = calculate_backend_fare(base_dist, "SUV") or int(80 + (base_dist * 5.0))
             pitch = f"I have a Lexus ES for {sedan_fare} Dirhams or a GMC Yukon for {suv_fare} Dirhams. Which do you prefer?"
