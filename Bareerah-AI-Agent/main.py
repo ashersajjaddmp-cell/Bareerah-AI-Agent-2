@@ -173,13 +173,14 @@ def calculate_backend_fare(dist_km, v_type, b_type="point_to_point"):
         resp = requests.post(url, json=data, headers=headers, timeout=5)
         if resp.status_code in [200, 201]:
             res_json = resp.json()
-            # ✅ Handle both root and 'data' wrapper
             fare = res_json.get("fare_aed") or res_json.get("data", {}).get("fare")
             
             # Use the fare if it's a valid positive number
-            if fare and float(fare) > 0:
-                print(f"💰 Fare Received: {fare}")
-                return int(float(fare))
+            try:
+                if fare and float(fare) > 0:
+                    print(f"💰 Fare Received: {fare}")
+                    return int(float(fare))
+            except: pass
                 
         print(f"⚠️ Fare API returned 0 or error {resp.status_code}: {resp.text}")
     except Exception as e:
@@ -195,16 +196,20 @@ def fetch_backend_vehicles(pax, luggage):
     url = f"{BACKEND_BASE_URL}/api/bookings/suggest-vehicles"
     print(f"🚗 Fetching cars from: {url} (pax={pax}, luggage={luggage})")
     try:
-        params = {"passengers_count": pax, "luggage_count": luggage}
+        params = {"passengers_count": int(pax), "luggage_count": int(luggage)}
         resp = requests.get(url, params=params, headers=headers, timeout=6)
         if resp.status_code == 200:
             data = resp.json()
             # ✅ Handle diverse backend structures
             if isinstance(data, dict):
-                return data.get("suggested_vehicles") or data.get("data", {}).get("suggested_vehicles") or data.get("vehicles", [])
+                v_list = data.get("suggested_vehicles") or data.get("data", {}).get("suggested_vehicles") or data.get("vehicles", [])
+                if not v_list:
+                     print(f"❓ No cars in JSON structure: {data}")
+                return v_list
             if isinstance(data, list):
                 return data
-    except: pass
+    except Exception as e:
+        print(f"⚠️ Suggest API Exception: {e}")
     
     # 2. Fallback to general available vehicles
     url = f"{BACKEND_BASE_URL}/api/vehicles/available"
@@ -371,7 +376,7 @@ def handle_call():
         
         # Override AI response
         ai_msg = pitch
-        state['history'].append({"role": "assistant", "content": pitch})
+        # History will be appended at the very end of the loop
 
     elif action == "finalize":
         p = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
@@ -609,20 +614,21 @@ def handle_call():
         send_email(f"🚀 NEW BOOKING: {state['slots'].get('customer_name', 'Guest')}", email_body)
         
         ai_msg = f"Great. I have booked the {car_model} for {fare} Dirhams. You will receive a confirmation shortly. Goodbye!"
-        resp = VoiceResponse()
-        resp.say(ai_msg, voice='Polly.Joanna-Neural')
-        resp.hangup()
         
-        # Final Save
+        # Save Final History
         state['history'].append({"role": "assistant", "content": ai_msg})
         if conn:
             with conn.cursor() as cur:
                 cur.execute("UPDATE call_state SET data = %s WHERE call_sid = %s", (json.dumps(state), call_sid))
             conn.commit()
             conn.close()
+
+        resp = VoiceResponse()
+        resp.say(ai_msg, voice='Polly.Joanna-Neural')
+        resp.hangup()
         return str(resp)
     
-    # Continue Loop
+    # Continue Loop (Global History Update)
     state['history'].append({"role": "assistant", "content": ai_msg})
     if conn:
         with conn.cursor() as cur:
