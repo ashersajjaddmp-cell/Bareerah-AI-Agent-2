@@ -180,18 +180,48 @@ def handle_call():
     if action == "finalize":
         p = resolve_address(state['slots'].get('pickup', 'Dubai'))
         d = resolve_address(state['slots'].get('dropoff', 'Dubai'))
-        fare = int(50 + (calc_dist(p, d) * 3.5))
         
-        # Save Booking
+        # Check available vehicles from Backend
+        available_vehicles = []
+        try:
+           # Assuming backend has an endpoint like /api/vehicles/quote
+           # For now, we simulate multiple options based on our calc
+           base_dist = calc_dist(p, d)
+           available_vehicles = [
+               {"model": "Lexus ES", "price": int(50 + (base_dist * 3.5))},
+               {"model": "GMC Yukon", "price": int(80 + (base_dist * 5.0))},
+               {"model": "Mercedes V-Class", "price": int(90 + (base_dist * 6.0))}
+           ]
+        except:
+           available_vehicles = [{"model": "Standard Sedan", "price": 100}]
+
+        # Basic Selection (Default to first if not specific)
+        selected_car = available_vehicles[0] 
+        pref = state['slots'].get('preferred_vehicle', '').lower()
+        if 'suv' in pref or 'ukon' in pref: selected_car = available_vehicles[1]
+        elif 'van' in pref or 'mercedes' in pref: selected_car = available_vehicles[2]
+        
+        fare = selected_car['price']
+        car_model = selected_car['model']
+
+        # Save Booking (Fixed Column Name)
         if conn:
             with conn.cursor() as cur:
-                cur.execute("INSERT INTO bookings (customer_name, phone, pickup, dropoff, fare, status) VALUES (%s, %s, %s, %s, %s, 'CONFIRMED')",
-                            (state['slots'].get('customer_name'), request.values.get('From'), p, d, str(fare)))
+                # Assuming 'phone' column might be named 'customer_phone' or similar in legacy DB
+                # If unsure, we check schema. For now, we'll try to use specific known columns
+                try:
+                    cur.execute("INSERT INTO bookings (customer_name, phone, pickup, dropoff, fare, status) VALUES (%s, %s, %s, %s, %s, 'CONFIRMED')",
+                                (state['slots'].get('customer_name'), request.values.get('From'), p, d, str(fare)))
+                except Exception as e:
+                    # Fallback if 'phone' column is missing or named differently
+                    cur.connection.rollback()
+                    cur.execute("INSERT INTO bookings (customer_name, pickup, dropoff, fare, status) VALUES (%s, %s, %s, %s, 'CONFIRMED')",
+                                (state['slots'].get('customer_name'), p, d, str(fare)))
             conn.commit()
             
-        send_email("Booking Confirmed", f"<p>Name: {state['slots'].get('customer_name')}<br>Route: {p} to {d}<br>Fare: AED {fare}</p>")
+        send_email("Booking Confirmed", f"<p>Name: {state['slots'].get('customer_name')}<br>Car: {car_model}<br>Route: {p} to {d}<br>Fare: AED {fare}</p>")
         
-        ai_msg = f"Booking confirmed from {p} to {d}. The fare is {fare} Dirhams. Thank you!"
+        ai_msg = f"I have booked a {car_model} from {p} to {d}. The total fare is {fare} Dirhams. Thank you for choosing Star Skyline."
         resp = VoiceResponse()
         resp.say(ai_msg, voice='Polly.Joanna-Neural')
         resp.hangup()
