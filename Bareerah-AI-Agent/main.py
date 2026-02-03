@@ -146,8 +146,14 @@ def fetch_backend_vehicles(pax, luggage):
         params = {"passengers_count": pax, "luggage_count": luggage}
         resp = requests.get(url, params=params, timeout=6)
         if resp.status_code == 200:
-            return resp.json() # Should be a list of suited vehicles
-    except: pass
+            data = resp.json()
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict):
+                # If wrapped in a 'data' or 'vehicles' key
+                return data.get("data", []) or data.get("vehicles", []) or []
+    except Exception as e:
+        print(f"⚠️ Suggest API Error: {e}")
     
     # 2. Fallback to general available vehicles
     url = f"{BACKEND_BASE_URL}/api/vehicles/available"
@@ -155,8 +161,11 @@ def fetch_backend_vehicles(pax, luggage):
         resp = requests.get(url, params={"passengers": pax, "luggage": luggage}, timeout=6)
         if resp.status_code == 200:
             data = resp.json()
-            return data.get("data", []) or data.get("vehicles", []) or (data if isinstance(data, list) else [])
-    except: pass
+            if isinstance(data, list): return data
+            if isinstance(data, dict):
+                return data.get("data", []) or data.get("vehicles", []) or []
+    except Exception as e:
+        print(f"⚠️ Available API Error: {e}")
     
     return []
 
@@ -193,7 +202,7 @@ def run_ai(history, slots):
     2. **LUGGAGE IS BAGS**: 'Luggage' and 'Bags' are the same. If you know one, you know the other. Never ask for both.
     3. **PITCH LOGIC**: ONCE you have [customer_name, pickup_location, dropoff_location, pickup_time, luggage_count], output action: "confirm_pitch". 
        - DO NOT pitch cars until you know the luggage count.
-    4. **DO NOT REPEAT**: If a slot is filled in 'Current Info', never ask for it again.
+    4. **DO NOT REPEAT**: If a slot is filled in 'Current Info', never ask for it again. If names/addresses are already there, MOVE TO THE NEXT missing item.
     
     Current Info: {json.dumps(slots)}
     
@@ -276,11 +285,16 @@ def handle_call():
         options = fetch_backend_vehicles(pax, lug)
         
         # Construction of the Pitch
-        if options:
+        logging.info(f"🚗 Options found: {type(options)} - {options}")
+        
+        # Guard against KeyError: slice(None, 2, None) by strictly checking list type
+        if isinstance(options, list) and len(options) > 0:
             pitch = "I have checked the availability for you. "
             b_type = "airport_transfer" if "airport" in (p+d).lower() else "point_to_point"
             
-            for v in options[:2]: # Top 2 suitable cars
+            # Use list slicing safely
+            for v in options[:2]:
+                if not isinstance(v, dict): continue
                 v_type = v.get('type', v.get('category', 'SEDAN')).upper()
                 v_model = v.get('model', v.get('vehicle', 'Car'))
                 
@@ -294,6 +308,7 @@ def handle_call():
             pitch += "Which one would you like to book?"
         else:
             # Fallback Pitch (Using Backend Fare API even for hardcoded types)
+            logging.info("🚕 Using Fallback hardcoded vehicle options")
             sedan_fare = calculate_backend_fare(base_dist, "SEDAN") or int(50 + (base_dist * 3.5))
             suv_fare = calculate_backend_fare(base_dist, "SUV") or int(80 + (base_dist * 5.0))
             pitch = f"I have a Lexus ES for {sedan_fare} Dirhams or a GMC Yukon for {suv_fare} Dirhams. Which do you prefer?"
