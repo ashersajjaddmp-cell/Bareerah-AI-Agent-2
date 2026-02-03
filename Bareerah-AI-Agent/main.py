@@ -1498,8 +1498,9 @@ def suggest_vehicle(passengers: int, luggage: int, jwt_token: str = None) -> tup
         options, error = call_suggest_vehicles_api(passengers, luggage, jwt_token)
         if options and len(options) > 0:
             print(f"[VEHICLE] ✅ From Backend API: Found {len(options)} options", flush=True)
-            # Use vehicle_type as primary type, model as best name
-            return options[0].get("vehicle_type"), options, None
+            # Use model as the primary name if available, else type
+            best_name = options[0].get("model") or options[0].get("type") or options[0].get("vehicle_type")
+            return best_name, options, None
     
     # Fallback to local logic if backend fails
     fallback_options = []
