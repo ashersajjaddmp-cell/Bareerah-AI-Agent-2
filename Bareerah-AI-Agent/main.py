@@ -3661,28 +3661,36 @@ def extract_nlu_clean(text, flow_step, locked_slots, lang="en"):
         step_templates = step_contexts_en # Placeholder for backward compat if needed
         
         # Prepare explicit status for LLM to prevent loops
-        known = [f"- {k.replace('_', ' ').upper()}: {v}" for k, v in locked_slots.items() if v]
+        known = [f"- {k.replace('_', ' ').upper()}: {v}" for k, v in locked_slots.items() if v is not None]
         known_str = "\n".join(known) if known else "None - This is the start of the booking."
+        all_slots = ["customer_name", "dropoff", "pickup", "datetime", "passengers", "luggage", "preferred_vehicle"]
+        missing_slots = [s.replace('_', ' ').upper() for s in all_slots if s not in locked_slots]
+        missing_str = ", ".join(missing_slots)
         
         system = f"""You are Bareerah, a world-class limousine assistant for Star Skyline.
 RESPONSE RULES:
-1. STATUS: {known_str}
-2. ACKNOWLEDGE: Always start by confirming what they just said. Example: "Got it, pickup from Marina at 2 PM tomorrow."
+1. COLLECTED: 
+{known_str}
+2. MISSING: {missing_str}
+3. ACKNOWLEDGE: Always start by confirming what they just said. Example: "Got it, Marina Mall."
 3. GROUPS:
    - identity: [customer_name]
-   - locations: [pickup, dropoff]
+   - locations: [dropoff, pickup] (Ask one by one)
    - schedule: [datetime] (Must include BOTH date and time)
    - cargo: [passengers, luggage, preferred_vehicle]
-4. NEXT STEP: Identify the first group with missing info. 
+4. EXTRACTION: 
+   - Extract "pickup" or "dropoff" based on keywords.
+   - If only one place is mentioned, assign it to the CURRENT FOCUS or based on "to/from" context.
+5. NEXT STEP: Identify the first missing slot. 
+   - If dropoff is missing, next is "dropoff". If pickup is missing, next is "pickup".
    - If schedule is missing date OR time, ask for the missing part specifically.
-   - For cargo, ask for passengers, luggage count, and if they have a preferred car (Sedan/SUV).
-   - If the user says they don't care about the car type, set "preferred_vehicle" to "any".
+   - For cargo, ask for passengers, luggage count, and preferred car.
 
 Return JSON:
 {{
   "extracted_slots": {{ "slot_name": "value" }},
-  "response": "Acknowledgment + Specific question for the next group",
-  "next_group": "identity|locations|schedule|cargo|confirm"
+  "response": "Acknowledgment + Question for the next missing slot",
+  "next_group": "identity|dropoff|pickup|schedule|cargo|confirm"
 }}"""
 
         user = f'Customer said: "{text}"\n\nExtract and respond.'
@@ -3709,10 +3717,19 @@ Return JSON:
         confidence = result.get('confidence', 0.9) # Default high for streamlining
         response = result.get('response', 'Got it. Moving on.')
         
-        # ✅ SMART LOCATION FALLBACK
-        if flow_step == "locations" and not extracted_slots.get("dropoff") and not extracted_slots.get("pickup"):
-             # Optional: word-match logic could go here if needed
-             pass
+        # ✅ SMART LOCATION FALLBACK (Catch common short words)
+        if flow_step == "locations" or not extracted_slots.get("pickup") or not extracted_slots.get("dropoff"):
+            low_text = text.lower()
+            for key, full_name in POPULAR_DUBAI_LOCATIONS.items():
+                if f"to {key}" in low_text or f"going to {key}" in low_text:
+                    extracted_slots["dropoff"] = full_name
+                elif f"from {key}" in low_text or f"at {key}" in low_text or f"pickup {key}" in low_text:
+                    extracted_slots["pickup"] = full_name
+                elif f" {key} " in f" {low_text} ": # General match
+                    if not extracted_slots.get("dropoff") and "dropoff" not in locked_slots:
+                         extracted_slots["dropoff"] = full_name
+                    elif not extracted_slots.get("pickup") and "pickup" not in locked_slots:
+                         extracted_slots["pickup"] = full_name
         
         print(f"[NLU] extracted={extracted_slots} | next_group={next_step} | response='{response[:50]}...'", flush=True)
         return {
@@ -4135,8 +4152,10 @@ def handle_call():
         # Mandatory Grouping Logic
         if "customer_name" in missing:
             mand_group = "identity"
-        elif "dropoff" in missing or "pickup" in missing:
-            mand_group = "locations"
+        elif "dropoff" in missing:
+            mand_group = "dropoff"
+        elif "pickup" in missing:
+            mand_group = "pickup"
         elif "datetime" in missing:
             mand_group = "schedule"
         elif "passengers" in missing or "luggage" in missing or "preferred_vehicle" in missing:
@@ -4149,7 +4168,7 @@ def handle_call():
 
         # Sync AI suggestion with Mandatory
         suggested = nlu.get("next_group", mand_group)
-        groups = ["identity", "locations", "schedule", "cargo", "vehicle", "confirm"]
+        groups = ["identity", "dropoff", "pickup", "schedule", "cargo", "vehicle", "confirm"]
         try:
             suggest_idx = groups.index(suggested)
             mand_idx = groups.index(mand_group)
@@ -4170,10 +4189,10 @@ def handle_call():
         # ✅ FUNCTIONAL LOGIC CHAIN (prevents hitting the final 'else')
         # ✅ FLOW STEP HANDLERS
         # ✅ FLOW STEP HANDLERS (Unified Support)
-        if ctx["flow_step"] in ["identity", "customer_name", "locations", "schedule", "datetime"]:
+        if ctx["flow_step"] in ["identity", "customer_name", "locations", "dropoff", "pickup", "schedule", "datetime"]:
             response_text = nlu.get("response")
         
-        elif ctx["flow_step"] in ["cargo", "requirements"]:
+        elif ctx["flow_step"] in ["cargo", "requirements", "passengers", "luggage", "preferred_vehicle"]:
              # Ensure luggage is numeric
              if "luggage" in ctx["locked_slots"] and ctx["locked_slots"]["luggage"] is None:
                  ctx["locked_slots"]["luggage"] = 0
