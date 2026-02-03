@@ -245,7 +245,8 @@ def run_ai(history, slots):
     2. **LUGGAGE IS BAGS**: 'Luggage' and 'Bags' are the same. If you know one, you know the other. Never ask for both.
     3. **PITCH LOGIC**: ONCE you have [customer_name, pickup_location, dropoff_location, pickup_time, luggage_count], output action: "confirm_pitch". 
        - DO NOT pitch cars until you know the luggage count.
-    4. **DO NOT REPEAT**: If a slot is filled in 'Current Info', never ask for it again. If names/addresses are already there, MOVE TO THE NEXT missing item.
+       - The user will choose a car from your options. When they pick one, extract it as 'preferred_vehicle' and action: "finalize".
+    4. **DO NOT REPEAT**: If a slot is filled in 'Current Info', never ask for it again.
     
     Current Info: {json.dumps(slots)}
     
@@ -352,7 +353,7 @@ def handle_call():
                          price = int(v.get('base_price', 50) + (base_dist * v.get('rate_per_km', 3.5)))
                 
                 pitch += f"A {v_model} for this {base_dist} kilometer journey is {price} Dirhams. "
-            pitch += "Which one would you like to book?"
+            pitch += "Which suitable option would you like to book?"
         else:
             # Fallback Pitch (Using Backend Fare API even for hardcoded types)
             logging.info("🚕 No suitable cars found in API, using fallback logic.")
