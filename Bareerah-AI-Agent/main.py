@@ -3666,16 +3666,20 @@ def extract_nlu_clean(text, flow_step, locked_slots, lang="en"):
         
         system = f"""You are Bareerah, a fast, professional limousine assistant for Star Skyline.
 RESPONSE RULES:
-1. Extract: {known_str}
-2. Focus: {flow_step}
-3. Goal: Collect all missing slots from [customer_name, dropoff, pickup, datetime, passengers, luggage].
-4. Strategy: Combine questions. If Pickup/Dropoff are missing, ask for BOTH. If Pax/Luggage are missing, ask for BOTH.
-5. Date: ALWAYS ask for "date and time" specifically.
+1. Extract info from the user's speech.
+2. ALREADY COLLECTED: {known_str}
+3. CURRENT FOCUS: {flow_step}
+4. ACKNOWLEDGMENT: If the user provides a detail (like pickup or dropoff), ALWAYS repeat it back to confirm. Example: "Got it, pickup from Marina Mall to Dubai Mall. Now, when do you need the ride?"
+5. STRATEGY: 
+   - Combine questions into groups: [locations (pickup+dropoff), datetime, requirements (passengers+luggage)].
+   - Only suggest moving to the NEXT group if ALL slots in the current group are extracted or already known.
+6. MANDATORY: Specifically ask for missing fields if only one part of a group is provided.
+7. DATE/TIME: Always ask for both date and time specifically.
 
 Return JSON:
 {{
   "extracted_slots": {{ "slot_name": "value" }},
-  "response": "Short acknowledgment + Question for next missing group",
+  "response": "Acknowledgment of what was just said + Question for next missing group/slots",
   "next_group": "locations|datetime|requirements|confirm"
 }}"""
 
@@ -4126,39 +4130,37 @@ def handle_call():
         all_slots = ["customer_name", "dropoff", "pickup", "datetime", "passengers", "luggage"]
         missing = [s for s in all_slots if s not in ctx["locked_slots"]]
         
-        if not missing:
-            # All info collected, check if we pitched the vehicle yet
-            if "vehicle_model" not in ctx["locked_slots"]:
-                ctx["flow_step"] = "vehicle"
-            else:
-                ctx["flow_step"] = "confirm"
-        elif "customer_name" in missing:
-            ctx["flow_step"] = "customer_name"
+        # Determine the first mandatory missing group
+        if "customer_name" in missing:
+            mandatory_step = "customer_name"
         elif "dropoff" in missing or "pickup" in missing:
-            ctx["flow_step"] = "locations"
+            mandatory_step = "locations"
         elif "datetime" in missing:
-            ctx["flow_step"] = "datetime"
+            mandatory_step = "datetime"
         elif "passengers" in missing or "luggage" in missing:
-            ctx["flow_step"] = "requirements"
+            mandatory_step = "requirements"
         else:
-            ctx["flow_step"] = "confirm"
+            mandatory_step = "vehicle"
+            
+        if not missing:
+            if "vehicle_model" in ctx["locked_slots"]:
+                mandatory_step = "confirm"
         
-        # Suggested step from NLU (handling both old next_step and new next_group keys)
-        suggested_next = nlu.get("next_group") or nlu.get("next_step") or ctx["flow_step"]
+        # Suggested step from NLU
+        suggested_next = nlu.get("next_group") or nlu.get("next_step") or mandatory_step
         
-        # Mapping suggested groups to internal steps for sync
-        group_map = {
-            "locations": "dropoff",
-            "datetime": "datetime",
-            "requirements": "passengers",
-            "confirm": "confirm",
-            "vehicle": "vehicle"
-        }
-        
-        # Final flow step is the current mandatory one
-        # Unless suggested is 'confirm' and we are actually done
-        if not missing and suggested_next == "confirm":
-             ctx["flow_step"] = "confirm"
+        # Sync: Cannot skip mandatory group
+        groups = ["customer_name", "locations", "datetime", "requirements", "vehicle", "confirm"]
+        try:
+            suggest_idx = groups.index(suggested_next)
+            mand_idx = groups.index(mandatory_step)
+            # If AI tries to skip a group, pull it back to mandatory
+            if mand_idx > suggest_idx:
+                ctx["flow_step"] = mandatory_step
+            else:
+                ctx["flow_step"] = suggested_next
+        except:
+            ctx["flow_step"] = mandatory_step
         
         # Override if airport detected but no flight info
         for loc_slot in ["pickup", "dropoff"]:
@@ -4167,12 +4169,6 @@ def handle_call():
                 ctx["flow_step"] = "flight_info"
                 ctx["locked_slots"]["flight_type"] = "arrival" if loc_slot == "pickup" else "departure"
 
-        # If airport, override to flight_info
-        for loc_slot in ["pickup", "dropoff"]:
-            lv = ctx["locked_slots"].get(loc_slot)
-            if lv and is_airport_location(lv) and not ctx["locked_slots"].get("flight_time"):
-                ctx["flow_step"] = "flight_info"
-                ctx["locked_slots"]["flight_type"] = "arrival" if loc_slot == "pickup" else "departure"
 
         response_text = nlu.get("response", "Could you repeat that?")
 
