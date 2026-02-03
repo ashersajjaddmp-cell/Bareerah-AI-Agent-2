@@ -261,24 +261,34 @@ def handle_call():
              car_model = "Lexus ES"
              fare = int(50 + (base_dist * 3.5))
 
-        # Save Booking (Flexible Schema)
+        # Save Booking (Verified Columns)
         if conn:
             try:
                 with conn.cursor() as cur:
-                    # Generic insert that adapts to likely column names
                     try:
-                         cur.execute("INSERT INTO bookings (customer_name, phone, pickup, dropoff, fare, status) VALUES (%s, %s, %s, %s, %s, 'CONFIRMED')",
-                                    (state['slots'].get('customer_name'), request.values.get('From'), p, d, str(fare)))
-                    except Exception:
+                         # Use columns confirmed by validation script:
+                         # customer_name, customer_phone, pickup_location, dropoff_location, fare_aed
+                         cur.execute("""
+                            INSERT INTO bookings 
+                            (customer_name, customer_phone, pickup_location, dropoff_location, fare_aed, status) 
+                            VALUES (%s, %s, %s, %s, %s, 'CONFIRMED')
+                         """, (
+                            state['slots'].get('customer_name'), 
+                            request.values.get('From'), 
+                            p, d, str(fare)
+                         ))
+                    except Exception as e:
                         cur.connection.rollback()
+                        logging.error(f"❌ Primary Insert Failed: {e}")
+                        # Minimal Fallback
                         try:
-                           cur.execute("INSERT INTO bookings (customer_name, fare, status) VALUES (%s, %s, 'CONFIRMED')",
+                           cur.execute("INSERT INTO bookings (customer_name, fare_aed, status) VALUES (%s, %s, 'CONFIRMED')",
                                     (state['slots'].get('customer_name'), str(fare)))
                         except:
                            cur.connection.rollback()
                 conn.commit()
             except Exception as e:
-                logging.error(f"DB Error: {e}")
+                logging.error(f"DB Connection Error: {e}")
 
         # Send Email
         send_email("Booking Confirmed", f"<p>Name: {state['slots'].get('customer_name')}<br>Car: {car_model}<br>Fare: AED {fare}</p>")
