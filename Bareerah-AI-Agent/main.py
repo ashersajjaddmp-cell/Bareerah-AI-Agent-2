@@ -118,32 +118,46 @@ def send_email(subject, body):
         except Exception as e:
             print(f"❌ Email Exception: {e}")
 
-def fetch_backend_vehicles(pax, luggage, pickup, dropoff):
-    """Fetch real vehicle suggestions from Backend API"""
-    url = f"{BACKEND_BASE_URL}/api/vehicles/available"
-    print(f"🚗 Fetching cars from: {url} (pax={pax}, route={pickup}->{dropoff})")
+def calculate_backend_fare(dist_km, v_type, b_type="point_to_point"):
+    """Call backend /api/bookings/calculate-fare for the perfect quote"""
+    url = f"{BACKEND_BASE_URL}/api/bookings/calculate-fare"
     try:
-        # Backend likely needs route info to calculate price/availability
-        params = {
-            "passengers": pax, 
-            "luggage": luggage,
-            "pickup_location": pickup,
-            "dropoff_location": dropoff
+        data = {
+            "distance_km": dist_km,
+            "vehicle_type": v_type.upper(),
+            "booking_type": b_type
         }
+        print(f"� Fetching Fare: {url} -> {data}")
+        resp = requests.post(url, json=data, timeout=5)
+        if resp.status_code == 200:
+            fare = resp.json().get("fare_aed")
+            print(f"💰 Fare Received: {fare}")
+            return fare
+    except Exception as e:
+        print(f"❌ Fare API Error: {e}")
+    return None
+
+def fetch_backend_vehicles(pax, luggage):
+    """Fetch real vehicle suggestions from Backend API based on capacity"""
+    # 1. Try smart suggestion first
+    url = f"{BACKEND_BASE_URL}/api/bookings/suggest-vehicles"
+    print(f"🚗 Fetching cars from: {url} (pax={pax}, luggage={luggage})")
+    try:
+        params = {"passengers_count": pax, "luggage_count": luggage}
         resp = requests.get(url, params=params, timeout=6)
-        print(f"🚗 Backend Status: {resp.status_code}")
-        
+        if resp.status_code == 200:
+            return resp.json() # Should be a list of suited vehicles
+    except: pass
+    
+    # 2. Fallback to general available vehicles
+    url = f"{BACKEND_BASE_URL}/api/vehicles/available"
+    try:
+        resp = requests.get(url, params={"passengers": pax, "luggage": luggage}, timeout=6)
         if resp.status_code == 200:
             data = resp.json()
-            vehicles = []
-            if isinstance(data, list):
-                vehicles = data
-            elif isinstance(data, dict):
-                vehicles = data.get("data", []) or data.get("vehicles", [])
-            return vehicles
-            
-    except Exception as e:
-        print(f"❌ Backend Fetch Error: {e}")
+            return data.get("data", []) or data.get("vehicles", []) or (data if isinstance(data, list) else [])
+    except: pass
+    
     return []
 
 def sync_booking_to_backend(booking_data):
@@ -256,26 +270,35 @@ def handle_call():
         d = resolve_address(state['slots'].get('dropoff_location', 'Dubai'))
         base_dist = calc_dist(p, d)
         
-        # Fetch Real Options (Now with Route Info)
+        # Fetch Real Options (Matches Capacity)
         pax = state['slots'].get('passengers_count', 1)
         lug = state['slots'].get('luggage_count', 0)
-        options = fetch_backend_vehicles(pax, lug, p, d)
+        options = fetch_backend_vehicles(pax, lug)
         
         # Construction of the Pitch
         if options:
-            pitch = "I have checked availability. "
-            for v in options[:2]: # Top 2
-                # If backend provides calculated total 'price', use it. Else calculate manually.
-                price = v.get('price') or int(v.get('base_price', 50) + (base_dist * v.get('rate_per_km', 3.5)))
-                pitch += f"A {v['model']} is {price} Dirhams. "
+            pitch = "I have checked the availability for you. "
+            b_type = "airport_transfer" if "airport" in (p+d).lower() else "point_to_point"
+            
+            for v in options[:2]: # Top 2 suitable cars
+                v_type = v.get('type', v.get('category', 'SEDAN')).upper()
+                v_model = v.get('model', v.get('vehicle', 'Car'))
+                
+                # Get Perfect Fare from Backend
+                price = calculate_backend_fare(base_dist, v_type, b_type)
+                if not price:
+                    # Fallback to local calculation
+                    price = int(v.get('base_price', 50) + (base_dist * v.get('rate_per_km', 3.5)))
+                
+                pitch += f"A {v_model} is {price} Dirhams. "
             pitch += "Which one would you like to book?"
         else:
-            # Fallback Pitch
-            sedan_price = int(50 + (base_dist * 3.5))
-            suv_price = int(80 + (base_dist * 5.0))
-            pitch = f"I have a Lexus ES for {sedan_price} Dirhams or a GMC Yukon for {suv_price} Dirhams. Which do you prefer?"
+            # Fallback Pitch (Using Backend Fare API even for hardcoded types)
+            sedan_fare = calculate_backend_fare(base_dist, "SEDAN") or int(50 + (base_dist * 3.5))
+            suv_fare = calculate_backend_fare(base_dist, "SUV") or int(80 + (base_dist * 5.0))
+            pitch = f"I have a Lexus ES for {sedan_fare} Dirhams or a GMC Yukon for {suv_fare} Dirhams. Which do you prefer?"
         
-        # Override AI response with accurate pricing pitch
+        # Override AI response
         ai_msg = pitch
         state['history'].append({"role": "assistant", "content": pitch})
 
@@ -284,17 +307,26 @@ def handle_call():
         d = resolve_address(state['slots'].get('dropoff_location', 'Dubai'))
         base_dist = calc_dist(p, d)
         
-        # Determine Car & Price (Default Logic if not explicit)
+        pax = state['slots'].get('passengers_count', 1)
+        lug = state['slots'].get('luggage_count', 0)
+        b_type = "airport_transfer" if "airport" in (p+d).lower() else "point_to_point"
+
+        # Determine Car & Final Price
         pref = state['slots'].get('preferred_vehicle', 'Lexus').lower()
         if 'suv' in pref or 'gmc' in pref:
              car_model = "GMC Yukon"
-             fare = int(80 + (base_dist * 5.0))
+             v_type = "SUV"
         elif 'van' in pref:
              car_model = "Mercedes V-Class"
-             fare = int(90 + (base_dist * 6.0))
+             v_type = "VAN"
         else:
              car_model = "Lexus ES"
-             fare = int(50 + (base_dist * 3.5))
+             v_type = "SEDAN"
+             
+        # Get Final Perfect Fare from Backend
+        fare = calculate_backend_fare(base_dist, v_type, b_type) or (
+            int(80 + (base_dist * 5.0)) if v_type == "SUV" else int(50 + (base_dist * 3.5))
+        )
 
         # Save Booking (Verified Columns)
         if conn:
