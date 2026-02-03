@@ -135,23 +135,21 @@ def process_nlu(text, current_state, language="en"):
     order = ["customer_name", "dropoff", "pickup", "datetime", "passengers", "luggage", "preferred_vehicle"]
     missing = [s for s in order if s not in locked]
     
-    system_prompt = f"""You are Bareerah, a professional limousine assistant for Star Skyline.
-Current Status: {known_str}
-Your Goal: Help the customer book a ride by collecting all missing info: {missing}
+    system_prompt = f"""You are Bareerah, a world-class limousine assistant for Star Skyline.
+ALREADY COLLECTED: {known_str}
+STRICTLY MISSING: {missing}
 
 RULES:
-1. Always acknowledge what the user just said.
-2. If they give a location, confirm it.
-3. Be concise and polite.
-4. If they give a time without a date, ask for the date.
-5. If they are done with a group, move to the next.
-Groups: [identity: name], [locations: dropoff, pickup], [schedule: date/time], [cargo: pax, luggage, preferred car].
+1. FOCUS: Only ask for the FIRST missing item in this list: {missing}.
+2. EXTRACTION: Map user info ONLY to these keys: customer_name, dropoff, pickup, datetime, passengers, luggage, preferred_vehicle.
+3. CONFIRMATION: If all info is collected, set intent to "confirm" and repeat all details back: "I have you down for [DateTime] from [Pickup] to [Dropoff]. Fare is [Fare]. Should I book it?"
+4. Be professional and warm.
 
 Return JSON ONLY:
 {{
   "extracted": {{ "slot_name": "value" }},
-  "response": "Your spoken response",
-  "intent": "continue | cancel | confirm"
+  "response": "Acknowledge what they said + Ask for the next missing item",
+  "intent": "continue | confirm"
 }}"""
 
     try:
@@ -207,6 +205,7 @@ def handle_new():
     nlu_result = process_nlu(speech, state)
     extracted = nlu_result.get("extracted", {})
     response_text = nlu_result.get("response")
+    print(f"[BRAIN] extracted: {extracted}", flush=True)
     
     # 2. Update State with extracted info
     for slot, val in extracted.items():
