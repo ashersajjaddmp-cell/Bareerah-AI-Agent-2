@@ -389,17 +389,29 @@ def handle_call():
         lug = state['slots'].get('luggage_count', 0)
         b_type = "airport_transfer" if "airport" in (p+d).lower() else "point_to_point"
 
-        # Determine Car & Final Price
-        pref = state['slots'].get('preferred_vehicle', 'Lexus').lower()
-        if 'suv' in pref or 'gmc' in pref:
-             car_model = "GMC Yukon"
+        # Determine Car & Final Price Dynamically from Preference
+        pref = state['slots'].get('preferred_vehicle', 'Car').lower()
+        
+        # Mapping Logic that respects backend types
+        if 'classic' in pref:
+             car_model = "Classic"
+             v_type = "CLASSIC"
+        elif 'executive' in pref:
+             car_model = "Executive"
+             v_type = "EXECUTIVE"
+        elif 'suv' in pref or 'gmc' in pref:
+             car_model = "SUV"
              v_type = "SUV"
-        elif 'van' in pref:
-             car_model = "Mercedes V-Class"
+        elif 'van' in pref or 'v-class' in pref:
+             car_model = "Luxury Van"
              v_type = "VAN"
+        elif 'first class' in pref:
+             car_model = "First Class"
+             v_type = "FIRST_CLASS"
         else:
-             car_model = "Lexus ES"
-             v_type = "SEDAN"
+             # Fallback: Just use the user's preference capitalized
+             car_model = pref.title()
+             v_type = pref.upper()
              
         # Get Final Perfect Fare from Backend
         fare = calculate_backend_fare(base_dist, v_type, b_type) or (
