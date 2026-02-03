@@ -108,10 +108,13 @@ def send_email(subject, body):
         print("❌ No RESEND_API_KEY found.")
         return
     try:
+        # ✅ FIX: Use Resend's default testing domain since custom domain is unverified
+        sender_email = "onboarding@resend.dev" 
+        
         resp = requests.post(
             "https://api.resend.com/emails",
             headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
-            json={"from": "Star Skyline <bookings@starskyline.ae>", "to": [NOTIFICATION_EMAIL], "subject": subject, "html": body},
+            json={"from": sender_email, "to": [NOTIFICATION_EMAIL], "subject": subject, "html": body},
             timeout=10
         )
         print(f"📧 Email Send Status: {resp.status_code}")
@@ -133,6 +136,10 @@ def fetch_backend_vehicles(pax=1, luggage=0):
                 return data.get("data").get("suggested_vehicles", [])
             else:
                 print(f"⚠️ Backend returned no data: {data}")
+        else:
+            print(f"⚠️ Backend Error {resp.status_code}, using fallback.")
+            # Fallback logic handled in caller
+            return []
     except Exception as e:
         print(f"❌ Backend Fetch Error: {e}")
     return []
@@ -145,15 +152,10 @@ def run_ai(history, slots):
     
     Current Info: {json.dumps(slots)}
     
-    CRITICAL FLOW:
-    1. Collect Name, Pickup, Dropoff, DateTime.
-    2. ONCE you have these 4 items, you MUST output action: "confirm_pitch". DO NOT ASK "What car?". Just pitch.
-    3. The system will handle the pitch logic.
-    4. AFTER the pitch, if user agrees, output action: "finalize".
-    
-    Rules:
-    - Zero bags = 0.
-    - Any car = "Standard Sedan".
+    CRITICAL RULES:
+    1. **ONE QUESTION AT A TIME**: Do NOT ask for everything at once. Ask for Name, then Pickup, then Dropoff, etc.
+    2. **Short & Natural**: Be conversational.
+    3. **PITCH LOGIC**: ONCE you have [Name, Pickup, Dropoff, DateTime], output action: "confirm_pitch".
     
     Output JSON: {{ "response": "text", "new_slots": {{key: val}}, "action": "continue|confirm_pitch|finalize" }}
     """
