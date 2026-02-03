@@ -140,10 +140,10 @@ ALREADY COLLECTED: {known_str}
 STRICTLY MISSING: {missing}
 
 RULES:
-1. FOCUS: Only ask for the FIRST missing item in this list: {missing}.
+1. CAPTURE EVERYTHING: Extract ALL info the user provides in this sentence, even if not asked.
 2. EXTRACTION: Map user info ONLY to these keys: customer_name, dropoff, pickup, datetime, passengers, luggage, preferred_vehicle.
-3. CONFIRMATION: If all info is collected, set intent to "confirm" and repeat all details back: "I have you down for [DateTime] from [Pickup] to [Dropoff]. Fare is [Fare]. Should I book it?"
-4. Be professional and warm.
+3. NEXT QUESTION: Check what is still missing. Only THEN ask for the FIRST missing item.
+4. CONFIRMATION: If all info is collected, set intent to "confirm" and repeat all details back: "I have you down for [DateTime] from [Pickup] to [Dropoff]. Fare is [Fare]. Should I book it?"
 
 Return JSON ONLY:
 {{
