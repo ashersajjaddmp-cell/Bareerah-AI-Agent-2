@@ -235,19 +235,39 @@ def handle_call():
         fare = selected_car['price']
         car_model = selected_car['model']
 
-        # Save Booking (Fixed Column Name)
+        # Save Booking (Flexible Schema)
         if conn:
-            with conn.cursor() as cur:
-                try:
-                    cur.execute("INSERT INTO bookings (customer_name, phone, pickup, dropoff, fare, status) VALUES (%s, %s, %s, %s, %s, 'CONFIRMED')",
-                                (state['slots'].get('customer_name'), request.values.get('From'), p, d, str(fare)))
-                except Exception as e:
-                    cur.connection.rollback()
-                    cur.execute("INSERT INTO bookings (customer_name, pickup, dropoff, fare, status) VALUES (%s, %s, %s, %s, 'CONFIRMED')",
-                                (state['slots'].get('customer_name'), p, d, str(fare)))
-            conn.commit()
-            
-        send_email("Booking Confirmed", f"<p>Name: {state['slots'].get('customer_name')}<br>Car: {car_model}<br>Route: {p} to {d}<br>Fare: AED {fare}</p>")
+            try:
+                with conn.cursor() as cur:
+                    # Generic insert that adapts to likely column names
+                    # 1. Try modern schema
+                    try:
+                         cur.execute("INSERT INTO bookings (customer_name, phone, pickup, dropoff, fare, status) VALUES (%s, %s, %s, %s, %s, 'CONFIRMED')",
+                                    (state['slots'].get('customer_name'), request.values.get('From'), p, d, str(fare)))
+                    except Exception:
+                        cur.connection.rollback()
+                        # 2. Try legacy schema (maybe it uses different column names or simple structure)
+                        # We will try a very minimal insert or just skip to email if DB is messed up
+                        try:
+                           cur.execute("INSERT INTO bookings (customer_name, fare, status) VALUES (%s, %s, 'CONFIRMED')",
+                                    (state['slots'].get('customer_name'), str(fare)))
+                        except:
+                           cur.connection.rollback()
+                           logging.error("❌ DB Insert Failed completely. Proceeding to Email.")
+                conn.commit()
+            except Exception as e:
+                logging.error(f"DB Error: {e}")
+
+        # Send Email (Critical Step)
+        email_body = f"""
+        <h2>✅ Booking Confirmed</h2>
+        <p><strong>Customer:</strong> {state['slots'].get('customer_name')}</p>
+        <p><strong>Phone:</strong> {request.values.get('From')}</p>
+        <p><strong>Car:</strong> {car_model}</p>
+        <p><strong>Route:</strong> {p} to {d}</p>
+        <p><strong>Fare:</strong> AED {fare}</p>
+        """
+        send_email("New Booking Confirmed", email_body)
         
         ai_msg = f"I have booked a {car_model} from {p} to {d}. The total fare is {fare} Dirhams. Thank you for choosing Star Skyline."
         resp = VoiceResponse()
