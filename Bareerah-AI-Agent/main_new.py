@@ -259,9 +259,36 @@ def handle_new():
 
         # Handle final confirmation
         if nlu_result.get("intent") == "confirm" or "yes" in speech.lower() or "confirm" in speech.lower():
-            # Create Booking in Backend
-            # (API Call to BOOKING_ENDPOINT would go here)
-            resp.say("Perfect! Your booking is confirmed. You will receive an SMS shortly. Thank you for choosing Star Skyline.")
+            jwt_token = get_jwt_token()
+            url = f"{BACKEND_BASE_URL}/api/bookings/create-manual"
+            headers = {"Authorization": f"Bearer {jwt_token}", "Content-Type": "application/json"}
+            
+            # Prepare payload for backend
+            booking_payload = {
+                "customer_name": state["locked_slots"].get("customer_name"),
+                "pickup_location": state["locked_slots"].get("pickup"),
+                "dropoff_location": state["locked_slots"].get("dropoff"),
+                "pickup_datetime": state["locked_slots"].get("datetime"),
+                "vehicle_type": state["locked_slots"].get("vehicle_model"),
+                "passengers": int(state["locked_slots"].get("passengers", 1)),
+                "luggage": int(state["locked_slots"].get("luggage", 0)),
+                "fare_quoted": state["locked_slots"].get("fare"),
+                "pickup_lat": state["locked_slots"].get("pickup_geo", {}).get("lat"),
+                "pickup_lng": state["locked_slots"].get("pickup_geo", {}).get("lng"),
+                "dropoff_lat": state["locked_slots"].get("dropoff_geo", {}).get("lat"),
+                "dropoff_lng": state["locked_slots"].get("dropoff_geo", {}).get("lng"),
+            }
+            
+            try:
+                final_resp = requests.post(url, headers=headers, json=booking_payload, timeout=10).json()
+                if final_resp.get("success"):
+                    resp.say("Perfect! Your booking is confirmed. You will receive an SMS shortly. Thank you for choosing Star Skyline.")
+                else:
+                    resp.say("I've processed your request, and our team will contact you shortly to finalize the details. Thank you!")
+            except Exception as e:
+                print(f"[BOOKING] Final error: {e}")
+                resp.say("Your booking request has been sent to our dispatch team. They will call you back in a few minutes. Thank you!")
+            
             resp.hangup()
             return str(resp)
 
