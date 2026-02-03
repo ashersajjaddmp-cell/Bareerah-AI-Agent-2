@@ -3664,36 +3664,20 @@ def extract_nlu_clean(text, flow_step, locked_slots, lang="en"):
         known = [f"- {k.replace('_', ' ').upper()}: {v}" for k, v in locked_slots.items() if v]
         known_str = "\n".join(known) if known else "None - This is the start of the booking."
         
-        system = f"""You are Bareerah, a human-like, professional limousine booking assistant for Star Skyline Limousine. 
-You are talking to a customer via voice. 
+system = f"""You are Bareerah, a fast, professional limousine assistant for Star Skyline.
+RESPONSE RULES:
+1. Extract: {known_str}
+2. Focus: {flow_step}
+3. Goal: Collect all missing slots from [customer_name, dropoff, pickup, datetime, passengers, luggage].
+4. Strategy: Combine questions. If Pickup/Dropoff are missing, ask for BOTH. If Pax/Luggage are missing, ask for BOTH.
+5. Date: ALWAYS ask for "date and time" specifically.
 
-BOOKING STATUS (ALREADY COLLECTED):
-{known_str}
-
-CURRENT FOCUS: {flow_step}
-ALL STEPS IN ORDER: [customer_name, name_confirm, dropoff, pickup, datetime, passengers, luggage, confirm]
-
-TASK:
-1. Extract info from the user's speech.
-2. If the user provided info for the CURRENT FOCUS, acknowledge it.
-3. Determine the NEXT missing slot from the 'ALL STEPS' list that is NOT in the 'BOOKING STATUS'.
-4. GENERATE a conversational response in {lang} that acknowledges the user and asks for the NEXT missing slot.
-5. If everything is collected, return 'confirm' as 'next_step'.
-
-Return ONLY this JSON:
+Return JSON:
 {{
   "extracted_slots": {{ "slot_name": "value" }},
-  "confidence": 0.0-1.0,
-  "response": "Acknowledge what they said + Ask for the NEXT missing slot",
-  "next_step": "the NEXT missing slot"
-}}
-
-RULES:
-- NEVER ask a question for a slot already listed in 'BOOKING STATUS'.
-- If the user gives multiple details (e.g. "I'm Ali and I have 2 bags"), extract both and move to the next missing piece.
-- If 'text' is empty or just "hello", greeting the user and ask for the 'CURRENT FOCUS'.
-- Keep responses very short, clear, and professional.
-ALWAYS return valid JSON."""
+  "response": "Short acknowledgment + Question for next missing group",
+  "next_group": "locations|datetime|requirements|confirm"
+}}"""
 
         user = f'Customer said: "{text}"\n\nExtract and respond.'
         
@@ -3710,32 +3694,21 @@ ALWAYS return valid JSON."""
         
         result = json.loads(resp.choices[0].message.content)
         extracted_slots = result.get('extracted_slots', {})
-        # For backward compatibility with the rest of the script:
+        
+        # Mapping new group key to flow logic
+        next_step = result.get('next_group') or result.get('next_step', flow_step)
+        
+        # Support fallback extracted value
         extracted = extracted_slots.get(flow_step) or result.get('extracted_value', '').strip()
-        confidence = result.get('confidence', 0)
-        response = result.get('response', 'Got it.')
-        next_step = result.get('next_step', flow_step)
+        confidence = result.get('confidence', 0.9) # Default high for streamlining
+        response = result.get('response', 'Got it. Moving on.')
         
-        # ✅ SMART LOCATION FALLBACK (If LLM extracted nothing or low confidence)
-        if flow_step in ["dropoff", "pickup"] and not extracted:
-            # (Keeping the word-match logic for safety)
-            text_lower = text.lower()
-            text_words = set(w for w in text_lower.split() if len(w) > 2)
-            best_value = None
-            best_score = 0
-            for key, val in POPULAR_DUBAI_LOCATIONS.items():
-                kw = set(w for w in key.split() if len(w) > 2)
-                if text_words & kw:
-                    score = len(text_words & kw) / (len(text_words) + 0.1)
-                    if score > best_score:
-                        best_score = score
-                        best_value = val
-            if best_value and best_score > 0.4:
-                extracted = best_value
-                extracted_slots[flow_step] = extracted
-                confidence = 0.9
+        # ✅ SMART LOCATION FALLBACK
+        if flow_step == "locations" and not extracted_slots.get("dropoff") and not extracted_slots.get("pickup"):
+             # Optional: word-match logic could go here if needed
+             pass
         
-        print(f"[NLU] extracted={extracted_slots} | next={next_step} | response='{response[:50]}...'", flush=True)
+        print(f"[NLU] extracted={extracted_slots} | next_group={next_step} | response='{response[:50]}...'", flush=True)
         return {
             "extracted_slots": extracted_slots,
             "extracted_value": extracted,
@@ -4149,50 +4122,50 @@ def handle_call():
                     ctx["locked_slots"][slot] = val
                     print(f"[BRAIN] ✅ Extracted {slot}: {val}", flush=True)
 
-        # ✅ STATE GUARD: Determine the actual next step
-        # Steps are the strings used in flow_step
-        all_steps = ["customer_name", "name_confirm", "dropoff", "pickup", "datetime", "passengers", "luggage", "confirm"]
-        suggested_next = nlu.get("next_step", ctx["flow_step"])
+        # ✅ COMPRESSED STATE GUARD
+        all_slots = ["customer_name", "dropoff", "pickup", "datetime", "passengers", "luggage"]
+        missing = [s for s in all_slots if s not in ctx["locked_slots"]]
         
-        # Forces sequential progress: Find the first missing mandatory step
-        next_mandatory = ctx["flow_step"]
-        for step in all_steps:
-            # Special logic for name_confirm: Only hit it if we just came from 'customer_name'
-            if step == "name_confirm":
-                if ctx["flow_step"] == "name_confirm":
-                    next_mandatory = "name_confirm"
-                    break
-                continue # Skip in mandatory check otherwise
-                
-            if step in ["luggage"]:
-                # Checked differently: luggage must be in slots and not None
-                if step not in ctx["locked_slots"]:
-                    next_mandatory = step
-                    break
-            elif not ctx["locked_slots"].get(step):
-                next_mandatory = step
-                break
-        else:
-            next_mandatory = "confirm"
-            
-        # Forces sequential progress: Mandatory steps ALWAYS take priority to prevent skipping
-        # If suggested_next is further than next_mandatory, we pull it back.
-        # This prevents the LLM from skipping luggage, notes, etc.
-        try:
-            suggested_idx = all_steps.index(suggested_next)
-            mandatory_idx = all_steps.index(next_mandatory)
-            
-            # ✅ HARD BLOCK: Never skip Luggage or Notes if they are missing
-            if next_mandatory in ["luggage", "notes"] and suggested_next in ["vehicle", "confirm"]:
-                 suggested_next = next_mandatory
-                 print(f"[GUARD] 🛑 FORCING STEP: {next_mandatory} (AI tried to skip)", flush=True)
-
-            if suggested_idx > mandatory_idx:
-                ctx["flow_step"] = next_mandatory
+        if not missing:
+            # All info collected, check if we pitched the vehicle yet
+            if "vehicle_model" not in ctx["locked_slots"]:
+                ctx["flow_step"] = "vehicle"
             else:
-                ctx["flow_step"] = suggested_next
-        except ValueError:
-            ctx["flow_step"] = suggested_next if suggested_next else next_mandatory
+                ctx["flow_step"] = "confirm"
+        elif "customer_name" in missing:
+            ctx["flow_step"] = "customer_name"
+        elif "dropoff" in missing or "pickup" in missing:
+            ctx["flow_step"] = "locations"
+        elif "datetime" in missing:
+            ctx["flow_step"] = "datetime"
+        elif "passengers" in missing or "luggage" in missing:
+            ctx["flow_step"] = "requirements"
+        else:
+            ctx["flow_step"] = "confirm"
+        
+        # Suggested step from NLU (handling both old next_step and new next_group keys)
+        suggested_next = nlu.get("next_group") or nlu.get("next_step") or ctx["flow_step"]
+        
+        # Mapping suggested groups to internal steps for sync
+        group_map = {
+            "locations": "dropoff",
+            "datetime": "datetime",
+            "requirements": "passengers",
+            "confirm": "confirm",
+            "vehicle": "vehicle"
+        }
+        
+        # Final flow step is the current mandatory one
+        # Unless suggested is 'confirm' and we are actually done
+        if not missing and suggested_next == "confirm":
+             ctx["flow_step"] = "confirm"
+        
+        # Override if airport detected but no flight info
+        for loc_slot in ["pickup", "dropoff"]:
+            lv = ctx["locked_slots"].get(loc_slot)
+            if lv and is_airport_location(lv) and not ctx["locked_slots"].get("flight_time"):
+                ctx["flow_step"] = "flight_info"
+                ctx["locked_slots"]["flight_type"] = "arrival" if loc_slot == "pickup" else "departure"
 
         # If airport, override to flight_info
         for loc_slot in ["pickup", "dropoff"]:
@@ -4204,9 +4177,29 @@ def handle_call():
         response_text = nlu.get("response", "Could you repeat that?")
 
         # ✅ FUNCTIONAL LOGIC CHAIN (prevents hitting the final 'else')
-        # These steps use the response generated by the Brain above unless overridden below.
-        if ctx["flow_step"] in ["dropoff", "pickup", "customer_name"]:
-             pass 
+        # ✅ FLOW STEP HANDLERS
+        if ctx["flow_step"] == "customer_name":
+            # (No extra logic needed, just play NLU response)
+            response_text = nlu.get("response")
+        
+        elif ctx["flow_step"] == "locations":
+            # If AI extracted pickup/dropoff, they are already in locked_slots via brain
+            # Just ensure we have a response asking for missing ones
+            # The Brain handles the text generation
+            response_text = nlu.get("response")
+
+        elif ctx["flow_step"] == "datetime":
+             # Use original numeric extraction for safety
+             if nlu.get("extracted_slots", {}).get("datetime"):
+                 # Validated above in brain
+                 pass
+             response_text = nlu.get("response")
+
+        elif ctx["flow_step"] == "requirements":
+             # Ensure luggage is not None
+             if "luggage" in ctx["locked_slots"] and ctx["locked_slots"]["luggage"] is None:
+                 ctx["locked_slots"]["luggage"] = 0
+             response_text = nlu.get("response")
 
         
         # ✅ STEP 2.5: ASK FOR FLIGHT INFO (if airport detected)
@@ -4284,36 +4277,45 @@ def handle_call():
         
         # ✅ STEP 3: ASK FOR DATETIME
         elif ctx["flow_step"] == "datetime":
-            if nlu.get("confidence", 0) >= 0.7:
-                raw_dt = nlu.get("extracted_value", "")
-                
+            dt_val = nlu.get("extracted_slots", {}).get("datetime") or nlu.get("extracted_value")
+            
+            if dt_val and len(dt_val) >= 5:
                 # ✅ DUBAI TIMEZONE FIX
                 try:
                     from datetime import datetime as dt, timezone, timedelta
                     dubai_tz = timezone(timedelta(hours=4))
-                    parsed = dt.strptime(raw_dt, "%Y-%m-%d %H:%M")
-                    now_utc = dt.now(timezone.utc)
-                    now_dubai = now_utc.astimezone(dubai_tz)
-                    dubai_dt = parsed.replace(tzinfo=dubai_tz)
-                    formatted_dt = dubai_dt.strftime("%Y-%m-%d %H:%M")
                     
-                    ctx["locked_slots"]["datetime"] = formatted_dt
+                    # Try to parse ISO or standard formats
+                    raw_dt = dt_val
+                    parsed = None
+                    for fmt in ["%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"]:
+                        try:
+                            parsed = dt.strptime(raw_dt[:16].replace('T', ' '), "%Y-%m-%d %H:%M")
+                            break
+                        except: continue
                     
-                    today_dubai = now_dubai.date()
-                    dubai_date = dubai_dt.date()
-                    days_diff = (dubai_date - today_dubai).days
-                    
-                    if days_diff < 0:
-                        ctx["flow_step"] = "datetime"
-                        response_text = "I'm sorry, I need a time in the future. When would you like the ride?"
-                    else:
-                        ctx["flow_step"] = "passengers"
-                        print(f"[DATETIME] ✅ ACCEPTED: {formatted_dt}", flush=True)
+                    if parsed:
+                        now_utc = dt.now(timezone.utc)
+                        now_dubai = now_utc.astimezone(dubai_tz)
+                        dubai_dt = parsed.replace(tzinfo=dubai_tz)
+                        formatted_dt = dubai_dt.strftime("%Y-%m-%d %H:%M")
+                        
+                        today_dubai = now_dubai.date()
+                        dubai_date = dubai_dt.date()
+                        days_diff = (dubai_date - today_dubai).days
+                        
+                        if days_diff < 0:
+                            response_text = "I'm sorry, that date is in the past. Could you please provide a future date and time?"
+                            ctx["flow_step"] = "datetime"
+                        else:
+                            ctx["locked_slots"]["datetime"] = formatted_dt
+                            ctx["flow_step"] = "requirements" # Move to next group
+                            print(f"[DATETIME] ✅ ACCEPTED: {formatted_dt}", flush=True)
                 except Exception as e:
                     print(f"[DATETIME] ⚠️ Parse error: {e}", flush=True)
             
             if not response_text: 
-                response_text = nlu.get("response", "When would you like the ride?")
+                response_text = nlu.get("response", "What date and time should we pick you up?")
         
         # ✅ STEP 4: PASSENGERS
         elif ctx["flow_step"] == "passengers":
