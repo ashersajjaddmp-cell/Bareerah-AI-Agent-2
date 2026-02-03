@@ -119,6 +119,8 @@ def calc_dist(p, d):
         url = "https://maps.googleapis.com/maps/api/distancematrix/json"
         params = {"origins": p, "destinations": d, "mode": "driving", "key": GOOGLE_MAPS_API_KEY}
         res = requests.get(url, params=params, timeout=5).json()
+        if res.get("status") == "REQUEST_DENIED":
+            print(f"⚠️ Google Maps REQUEST_DENIED. Check API Key for domain restrictions.")
         print(f"🗺️ Maps Status: {res.get('status')} | Elements: {res.get('rows', [{}])[0].get('elements', [{}])[0].get('status') if res.get('rows') else 'N/A'}")
         if res.get("rows") and res["rows"][0]["elements"][0]["status"] == "OK":
             dist = res["rows"][0]["elements"][0]["distance"]["value"] / 1000.0
@@ -169,11 +171,16 @@ def calculate_backend_fare(dist_km, v_type, b_type="point_to_point"):
         print(f"💰 Fetching Fare: {url} -> {data}")
         resp = requests.post(url, json=data, headers=headers, timeout=5)
         if resp.status_code in [200, 201]:
-            fare = resp.json().get("fare_aed")
-            if fare is not None:
+            res_json = resp.json()
+            # ✅ Handle both root and 'data' wrapper
+            fare = res_json.get("fare_aed") or res_json.get("data", {}).get("fare")
+            
+            # Use the fare if it's a valid positive number
+            if fare and float(fare) > 0:
                 print(f"💰 Fare Received: {fare}")
-                return fare
-        print(f"⚠️ Fare API returned {resp.status_code}: {resp.text}")
+                return int(float(fare))
+                
+        print(f"⚠️ Fare API returned 0 or error {resp.status_code}: {resp.text}")
     except Exception as e:
         print(f"❌ Fare API Error: {e}")
     return None
@@ -191,9 +198,9 @@ def fetch_backend_vehicles(pax, luggage):
         resp = requests.get(url, params=params, headers=headers, timeout=6)
         if resp.status_code == 200:
             data = resp.json()
-            # ✅ FIX: Handle the 'suggested_vehicles' key from logs
-            if isinstance(data, dict) and "suggested_vehicles" in data:
-                return data["suggested_vehicles"]
+            # ✅ Handle diverse backend structures
+            if isinstance(data, dict):
+                return data.get("suggested_vehicles") or data.get("data", {}).get("suggested_vehicles") or data.get("vehicles", [])
             if isinstance(data, list):
                 return data
     except: pass
@@ -420,12 +427,18 @@ def handle_call():
             except Exception as e:
                 logging.error(f"DB Connection Error: {e}")
 
-        # ✅ SYNC TO BACKEND (New Step)
+        # ✅ SYNC TO BACKEND (Verified mandatory fields)
         sync_booking_to_backend({
             "customer_name": state['slots'].get('customer_name'),
-            "phone": request.values.get('From'),
+            "customer_phone": request.values.get('From'),
+            "customer_email": state['slots'].get('email', 'no@email.com'),
             "pickup_location": p,
             "dropoff_location": d,
+            "booking_type": b_type,
+            "vehicle_type": v_type,
+            "distance_km": base_dist,
+            "passengers_count": pax,
+            "luggage_count": lug,
             "fare_aed": fare,
             "vehicle_model": car_model,
             "pickup_time": state['slots'].get('pickup_time')
