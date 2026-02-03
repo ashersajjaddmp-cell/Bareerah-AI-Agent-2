@@ -166,30 +166,30 @@ def sync_booking_to_backend(booking_data):
 def run_ai(history, slots):
     system = f"""
     You are Bareerah, Star Skyline Limousine's AI agent.
+    Goal: Book a ride.
     
-    GOAL: Complete this 3-Step Flow:
-    1. **COLLECT DETAILS**: Ask one-by-one for Name, Pickup, Dropoff, DateTime.
-    2. **PITCH OPTIONS**: When you have those 4 items, output action: "confirm_pitch". (Do not ask "what car" yet).
-    3. **FINALIZE**: The user will hear prices. When they choose a car, extract 'preferred_vehicle' and output action: "finalize".
+    CRITICAL RULES:
+    1. **STRICT ONE QUESTION AT A TIME**: Never ask for two things. Ask only for ONE missing piece. 
+       - Order: 1. Name -> 2. Pickup -> 3. Dropoff -> 4. Date and Time.
+    2. **DO NOT REPEAT**: If a slot is filled in 'Current Info', NEVER ask for it again.
+    3. **PITCH LOGIC**: ONCE you have [Name, Pickup, Dropoff, DateTime], output action: "confirm_pitch".
+    4. **WAIT FOR ANSWER**: After asking a question (e.g., "Where are you going?"), you MUST wait for the user. Do not proceed to the next slot until the current one is filled.
     
     Current Info: {json.dumps(slots)}
-    
-    Rules:
-    - If user selects a car (e.g. "The Lexus", "The first one"), set 'preferred_vehicle'.
-    - Once 'preferred_vehicle' is set -> action: "finalize".
     
     Output JSON: {{ "response": "text", "new_slots": {{key: val}}, "action": "continue|confirm_pitch|finalize" }}
     """
     try:
+        # Increased history buffer to 15 to prevent loops/forgetting
         resp = client.chat.completions.create(
             model="gpt-4o",
-            messages=[{"role": "system", "content": system}] + history[-6:],
+            messages=[{"role": "system", "content": system}] + history[-15:],
             response_format={"type": "json_object"},
             temperature=0.0
         )
         return json.loads(resp.choices[0].message.content)
     except:
-        return {"response": "Could you say that again?", "new_slots": {}, "action": "continue"}
+        return {"response": "I'm sorry, I missed that. Could you repeat?", "new_slots": {}, "action": "continue"}
 
 # ✅ 5. ROUTES (Matching Legacy Structure)
 
