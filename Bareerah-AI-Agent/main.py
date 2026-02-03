@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-load_dotenv()  # ✅ Load environment variables from .env file (Redeploy Trigger)
+load_dotenv()  # ✅ Load environment variables (REDEPLOY TRIGGER: 2026-02-03 20:01)
 
 import sys
 # ✅ Fix UnicodeEncodeError on Windows (console doesn't support emojis by default)
