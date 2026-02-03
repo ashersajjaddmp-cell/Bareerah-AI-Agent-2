@@ -244,14 +244,17 @@ def handle_call():
         d = resolve_address(state['slots'].get('dropoff', 'Dubai'))
         base_dist = calc_dist(p, d)
         
-        # Fetch Real Options
-        options = fetch_backend_vehicles(state['slots'].get('passengers', 1))
+        # Fetch Real Options (Now with Route Info)
+        pax = state['slots'].get('passengers', 1)
+        lug = state['slots'].get('luggage', 0)
+        options = fetch_backend_vehicles(pax, lug, p, d)
         
         # Construction of the Pitch
         if options:
             pitch = "I have checked availability. "
             for v in options[:2]: # Top 2
-                price = int(v.get('base_price', 50) + (base_dist * v.get('rate_per_km', 3.5)))
+                # If backend provides calculated total 'price', use it. Else calculate manually.
+                price = v.get('price') or int(v.get('base_price', 50) + (base_dist * v.get('rate_per_km', 3.5)))
                 pitch += f"A {v['model']} is {price} Dirhams. "
             pitch += "Which one would you like to book?"
         else:
@@ -310,8 +313,30 @@ def handle_call():
             except Exception as e:
                 logging.error(f"DB Connection Error: {e}")
 
-        # Send Email
-        send_email("Booking Confirmed", f"<p>Name: {state['slots'].get('customer_name')}<br>Car: {car_model}<br>Fare: AED {fare}</p>")
+        # ✅ SYNC TO BACKEND (New Step)
+        sync_booking_to_backend({
+            "customer_name": state['slots'].get('customer_name'),
+            "phone": request.values.get('From'),
+            "pickup": p,
+            "dropoff": d,
+            "fare": fare,
+            "vehicle": car_model
+        })
+
+        # Send Email (Admin Style)
+        email_body = f"""
+        <div style="font-family: Arial; padding: 20px; border: 1px solid #ddd;">
+            <h2 style="color: #2c3e50;">🔔 New Booking Alert (Admin)</h2>
+            <p><strong>Customer:</strong> {state['slots'].get('customer_name')}</p>
+            <p><strong>Phone:</strong> {request.values.get('From')}</p>
+            <hr>
+            <p><strong>Pickup:</strong> {p}</p>
+            <p><strong>Dropoff:</strong> {d}</p>
+            <p><strong>Vehicle:</strong> {car_model}</p>
+            <p><strong>Total Fare:</strong> <span style="font-size: 1.2em; font-weight: bold; color: green;">AED {fare}</span></p>
+        </div>
+        """
+        send_email(f"🚀 NEW BOOKING: {state['slots'].get('customer_name')}", email_body)
         
         ai_msg = f"Great. I have booked the {car_model} for {fare} Dirhams. You will receive a confirmation shortly. Goodbye!"
         resp = VoiceResponse()
