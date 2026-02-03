@@ -1344,8 +1344,9 @@ def validate_location_structure(text: str, language: str = "en", confidence: flo
         print("[LOCATION VALIDATION] Rejected generic location:", clean, flush=True)
         return False
     
-    # If fewer than 2 words, reject (require specific detail like "Dubai Marina" or "JBR Beach")
-    if len(clean.split()) < 2:
+    # If fewer than 2 words, reject (unless it represents a very strong geo marker like 'dxb')
+    word_count = len(clean.split())
+    if word_count < 2 and clean not in ["dxb", "marina", "jbr", "jvc", "jlt"]:
         print("[LOCATION VALIDATION] Rejected too-short location:", clean, flush=True)
         return False
     
@@ -1449,10 +1450,14 @@ def call_suggest_vehicles_api(passengers: int, luggage: int, jwt_token: str):
     """Call backend's /bookings/suggest-vehicles endpoint for a list of valid vehicles"""
     try:
         result = backend_api("GET", f"/bookings/suggest-vehicles?passengers_count={passengers}&luggage_count={luggage}", jwt_token=jwt_token)
-        if result and isinstance(result, list) and len(result) > 0:
-            return result, None # Return FULL LIST
+        # ✅ BACKEND FIX: Result is {"success": true, "data": {"suggested_vehicles": [...]}}
+        if result and result.get("success") and "data" in result:
+            suggestions = result["data"].get("suggested_vehicles", [])
+            if isinstance(suggestions, list) and len(suggestions) > 0:
+                return suggestions, None
         return [], "No suitable vehicles available"
-    except:
+    except Exception as e:
+        print(f"[VEHICLE API] ❌ Error: {e}", flush=True)
         return [], "Failed to get vehicle suggestions"
 
 def suggest_vehicle(passengers: int, luggage: int, jwt_token: str = None) -> tuple:
@@ -1493,7 +1498,8 @@ def suggest_vehicle(passengers: int, luggage: int, jwt_token: str = None) -> tup
         options, error = call_suggest_vehicles_api(passengers, luggage, jwt_token)
         if options and len(options) > 0:
             print(f"[VEHICLE] ✅ From Backend API: Found {len(options)} options", flush=True)
-            return options[0].get("type"), options, None
+            # Use vehicle_type as primary type, model as best name
+            return options[0].get("vehicle_type"), options, None
     
     # Fallback to local logic if backend fails
     fallback_options = []
@@ -4144,7 +4150,7 @@ def handle_call():
 
         # ✅ STATE GUARD: Determine the actual next step
         # Steps are the strings used in flow_step
-        all_steps = ["customer_name", "name_confirm", "dropoff", "pickup", "datetime", "passengers", "luggage", "vehicle"]
+        all_steps = ["customer_name", "name_confirm", "dropoff", "pickup", "datetime", "passengers", "luggage", "confirm"]
         suggested_next = nlu.get("next_step", ctx["flow_step"])
         
         # Forces sequential progress: Find the first missing mandatory step
@@ -4353,7 +4359,13 @@ def handle_call():
                         best_model = options[0].get("model") if options else vehicle.upper()
                         ctx["locked_slots"]["vehicle_model"] = best_model
                         
-                        car_choices = [f"a {opt.get('model', opt['type'].upper())} (AED {opt.get('fare', int(fare))})" for opt in options[:3]]
+                        car_choices = []
+                        for opt in options[:4]:
+                            # Get best display name: model or vehicle_type
+                            name = opt.get("model") or opt.get("vehicle_type", vehicle).upper()
+                            price = opt.get("fare") or int(fare)
+                            car_choices.append(f"a {name} (AED {price})")
+                        
                         car_list_str = " or ".join(car_choices) if car_choices else "available cars"
                         
                         ctx["flow_step"] = "confirm"
@@ -4759,9 +4771,10 @@ def handle_call():
                     resp.hangup()
                     return str(resp)
             elif has_reject_word and not has_positive_phrase:
-                response_text = "No problem. Let me start over. Where would you like to go?"
-                ctx["flow_step"] = "dropoff"
-                ctx["locked_slots"] = {}
+                response_text = "I understand. What would you like to change? Your pickup, dropoff, or time?"
+                ctx["flow_step"] = "confirm" # Stay in confirm but wait for correction
+                # DO NOT clear locked_slots here, let the NLU handle the correction
+                print("[FLOW] 🔄 Customer rejected/asked change - staying in confirm", flush=True)
             else:
                 vehicle_model = ctx["locked_slots"].get("vehicle_model", "SUV")
                 fare = ctx["locked_slots"].get("fare", "AED 220")
@@ -4818,8 +4831,6 @@ def handle_call():
         low_resp = response_text.lower()
         if ctx["flow_step"] == "luggage" and any(w in low_resp for w in ["name", "ali", "john", "who", "confirm", "speaking"]):
              response_text = "Got it. How many bags or luggage will you have with you?"
-        elif ctx["flow_step"] == "notes" and any(w in low_resp for w in ["bag", "luggage", "many", "count"]):
-             response_text = "Noted. Any special requests for the driver, or should I proceed with the booking?"
         elif ctx["flow_step"] == "datetime" and any(w in low_resp for w in ["pickup", "from", "where"]):
              response_text = "Okay. And at what time do you need the ride?"
         elif ctx["flow_step"] == "passengers" and any(w in low_resp for w in ["time", "when", "o'clock", "date"]):
@@ -4829,13 +4840,9 @@ def handle_call():
         if current_lang == "ur":
             if ctx["flow_step"] == "luggage" and "bags" not in low_resp and "luggage" not in low_resp:
                 response_text = "Theek hai. Kitne bags honge aapke paas?"
-            elif ctx["flow_step"] == "notes" and "requests" not in low_resp:
-                response_text = "Theek hai, note kar liya. Driver ke liye koi khaas hidayat?"
         elif current_lang == "ar":
             if ctx["flow_step"] == "luggage" and "حقيبة" not in response_text and "bags" not in low_resp:
                 response_text = "تمام. كم حقيبة معك؟"
-            elif ctx["flow_step"] == "notes" and "طلبات" not in response_text and "requests" not in low_resp:
-                response_text = "تمام، تم التسجيل. هل لديك أي طلبات خاصة للسائق؟"
 
         # ✅ LOG BAREERAH RESPONSE
         print(f"[BAREERAH] 🎤 {response_text} (Target Step: {ctx['flow_step']})", flush=True)
