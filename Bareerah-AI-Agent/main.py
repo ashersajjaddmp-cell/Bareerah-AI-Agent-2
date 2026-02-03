@@ -22,7 +22,22 @@ GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "https://star-skyline-production.up.railway.app")
-NOTIFICATION_EMAIL = "aizaz.dmp@gmail.com" # ✅ Updated to match Resend verified account
+NOTIFICATION_EMAIL = "aizaz.dmp@gmail.com" 
+
+# ✅ JWT FOR BACKEND AUTH
+CACHED_TOKEN = None
+
+def get_token():
+    global CACHED_TOKEN
+    if CACHED_TOKEN: return CACHED_TOKEN
+    try:
+        url = f"{BACKEND_BASE_URL}/api/auth/login"
+        resp = requests.post(url, json={"username":"admin","password":"admin123"}, timeout=5)
+        if resp.status_code == 200:
+            CACHED_TOKEN = resp.json().get("token")
+            return CACHED_TOKEN
+    except: pass
+    return None
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -121,14 +136,16 @@ def send_email(subject, body):
 def calculate_backend_fare(dist_km, v_type, b_type="point_to_point"):
     """Call backend /api/bookings/calculate-fare for the perfect quote"""
     url = f"{BACKEND_BASE_URL}/api/bookings/calculate-fare"
+    token = get_token()
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
         data = {
             "distance_km": dist_km,
             "vehicle_type": v_type.upper(),
             "booking_type": b_type
         }
-        print(f"� Fetching Fare: {url} -> {data}")
-        resp = requests.post(url, json=data, timeout=5)
+        print(f"💰 Fetching Fare: {url} -> {data}")
+        resp = requests.post(url, json=data, headers=headers, timeout=5)
         if resp.status_code == 200:
             fare = resp.json().get("fare_aed")
             print(f"💰 Fare Received: {fare}")
@@ -139,43 +156,45 @@ def calculate_backend_fare(dist_km, v_type, b_type="point_to_point"):
 
 def fetch_backend_vehicles(pax, luggage):
     """Fetch real vehicle suggestions from Backend API based on capacity"""
+    token = get_token()
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    
     # 1. Try smart suggestion first
     url = f"{BACKEND_BASE_URL}/api/bookings/suggest-vehicles"
     print(f"🚗 Fetching cars from: {url} (pax={pax}, luggage={luggage})")
     try:
         params = {"passengers_count": pax, "luggage_count": luggage}
-        resp = requests.get(url, params=params, timeout=6)
+        resp = requests.get(url, params=params, headers=headers, timeout=6)
         if resp.status_code == 200:
             data = resp.json()
+            # ✅ FIX: Handle the 'suggested_vehicles' key from logs
+            if isinstance(data, dict) and "suggested_vehicles" in data:
+                return data["suggested_vehicles"]
             if isinstance(data, list):
                 return data
-            if isinstance(data, dict):
-                # If wrapped in a 'data' or 'vehicles' key
-                return data.get("data", []) or data.get("vehicles", []) or []
-    except Exception as e:
-        print(f"⚠️ Suggest API Error: {e}")
+    except: pass
     
     # 2. Fallback to general available vehicles
     url = f"{BACKEND_BASE_URL}/api/vehicles/available"
     try:
-        resp = requests.get(url, params={"passengers": pax, "luggage": luggage}, timeout=6)
+        resp = requests.get(url, params={"passengers": pax, "luggage": luggage}, headers=headers, timeout=6)
         if resp.status_code == 200:
             data = resp.json()
             if isinstance(data, list): return data
             if isinstance(data, dict):
                 return data.get("data", []) or data.get("vehicles", []) or []
-    except Exception as e:
-        print(f"⚠️ Available API Error: {e}")
+    except: pass
     
     return []
 
 def sync_booking_to_backend(booking_data):
     """Sync confirmed booking to external backend"""
-    # ✅ FIX: Use the 'create-manual' endpoint which is common in your legacy code
     url = f"{BACKEND_BASE_URL}/api/bookings/create-manual"
+    token = get_token()
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
         print(f"🔄 Syncing booking to {url}...")
-        resp = requests.post(url, json=booking_data, timeout=5)
+        resp = requests.post(url, json=booking_data, headers=headers, timeout=5)
         print(f"🔄 Sync Status: {resp.status_code}")
         if resp.status_code != 200:
             print(f"⚠️ Sync failed: {resp.text}")
@@ -214,9 +233,9 @@ def run_ai(history, slots):
     }}
     """
     try:
-        # Increased history buffer to 15 to prevent loops/forgetting
+        # ✅ SPEED: Using gpt-4o-mini for 3x faster response
         resp = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=[{"role": "system", "content": system}] + history[-15:],
             response_format={"type": "json_object"},
             temperature=0.0
@@ -246,7 +265,7 @@ def incoming_call():
         conn.commit()
     
     resp = VoiceResponse()
-    gather = resp.gather(input='speech', action='/handle', timeout=4)
+    gather = resp.gather(input='speech', action='/handle', timeout=2)
     gather.say("Welcome to Star Skyline. I am Bareerah. May I have your name?", voice='Polly.Joanna-Neural')
     return str(resp)
 
@@ -295,8 +314,9 @@ def handle_call():
             # Use list slicing safely
             for v in options[:2]:
                 if not isinstance(v, dict): continue
-                v_type = v.get('type', v.get('category', 'SEDAN')).upper()
-                v_model = v.get('model', v.get('vehicle', 'Car'))
+                # Use vehicle_type as primary key from suggest API
+                v_type = v.get('vehicle_type', v.get('type', 'SEDAN')).upper()
+                v_model = v.get('vehicle_type', v.get('model', 'Car')).replace("_", " ").title()
                 
                 # Get Perfect Fare from Backend
                 price = calculate_backend_fare(base_dist, v_type, b_type)
@@ -420,7 +440,7 @@ def handle_call():
         conn.commit()
     
     resp = VoiceResponse()
-    gather = resp.gather(input='speech', action='/handle', timeout=4)
+    gather = resp.gather(input='speech', action='/handle', timeout=2)
     gather.say(ai_msg, voice='Polly.Joanna-Neural')
     resp.redirect('/handle')
     return str(resp)
