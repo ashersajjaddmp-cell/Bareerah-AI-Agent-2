@@ -102,32 +102,58 @@ def send_email(subject, body):
         )
     except: pass
 
+def send_email(subject, body):
+    """Resend API via Requests"""
+    if not RESEND_API_KEY: 
+        print("❌ No RESEND_API_KEY found.")
+        return
+    try:
+        resp = requests.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+            json={"from": "Star Skyline <bookings@starskyline.ae>", "to": [NOTIFICATION_EMAIL], "subject": subject, "html": body},
+            timeout=10
+        )
+        print(f"📧 Email Send Status: {resp.status_code}")
+        if resp.status_code != 200:
+            print(f"❌ Email Error Details: {resp.text}")
+    except Exception as e:
+        print(f"❌ Email Exception: {e}")
+
 def fetch_backend_vehicles(pax=1, luggage=0):
     """Fetch real vehicle suggestions from Backend API"""
     url = f"{BACKEND_BASE_URL}/api/vehicles/suggest"
+    print(f"🚗 Fetching cars from: {url} (pax={pax})")
     try:
-        resp = requests.get(url, params={"passengers": pax, "luggage": luggage}, timeout=4)
+        resp = requests.get(url, params={"passengers": pax, "luggage": luggage}, timeout=5)
+        print(f"🚗 Backend Status: {resp.status_code}")
         if resp.status_code == 200:
             data = resp.json()
             if data.get("success") and data.get("data"):
                 return data.get("data").get("suggested_vehicles", [])
+            else:
+                print(f"⚠️ Backend returned no data: {data}")
     except Exception as e:
-        logging.error(f"Backend API Error: {e}")
+        print(f"❌ Backend Fetch Error: {e}")
     return []
 
 # ✅ 4. AI BRAIN (The "Fluid" Part)
 def run_ai(history, slots):
     system = f"""
     You are Bareerah, Star Skyline Limousine's AI agent.
-    Goal: Book a ride. Collect: Name, Pickup, Dropoff, DateTime, Car Preference.
+    Goal: Book a ride. Collect: Name, Pickup, Dropoff, DateTime.
     
     Current Info: {json.dumps(slots)}
     
+    CRITICAL FLOW:
+    1. Collect Name, Pickup, Dropoff, DateTime.
+    2. ONCE you have these 4 items, you MUST output action: "confirm_pitch". DO NOT ASK "What car?". Just pitch.
+    3. The system will handle the pitch logic.
+    4. AFTER the pitch, if user agrees, output action: "finalize".
+    
     Rules:
-    1. No loops. If you have info, don't ask again.
-    2. Zero bags = 0.
-    3. Any car = "Standard Sedan".
-    4. Once all 5 slots filled -> action: "finalize".
+    - Zero bags = 0.
+    - Any car = "Standard Sedan".
     
     Output JSON: {{ "response": "text", "new_slots": {{key: val}}, "action": "continue|confirm_pitch|finalize" }}
     """
