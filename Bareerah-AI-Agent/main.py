@@ -9,6 +9,7 @@ from flask import Flask, request, jsonify
 from twilio.twiml.voice_response import VoiceResponse
 from openai import OpenAI
 from dotenv import load_dotenv
+from datetime import datetime
 
 # ✅ 1. SETUP
 load_dotenv()
@@ -444,20 +445,168 @@ def handle_call():
             "pickup_time": state['slots'].get('pickup_time')
         })
 
-        # Send Email (Admin Style)
+        # Send Email (Premium Template)
+        bk_ref = f"STARS-{call_sid[-6:].upper() if call_sid else 'XXXX'}"
+        now_str = datetime.now().strftime('%d %B, %I:%M %p')
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
         email_body = f"""
-        <div style="font-family: Arial; padding: 20px; border: 1px solid #ddd;">
-            <h2 style="color: #2c3e50;">🔔 New Booking Alert (Admin)</h2>
-            <p><strong>Customer:</strong> {state['slots'].get('customer_name')}</p>
-            <p><strong>Phone:</strong> {request.values.get('From')}</p>
-            <hr>
-            <p><strong>Pickup:</strong> {p}</p>
-            <p><strong>Dropoff:</strong> {d}</p>
-            <p><strong>Vehicle:</strong> {car_model}</p>
-            <p><strong>Total Fare:</strong> <span style="font-size: 1.2em; font-weight: bold; color: green;">AED {fare}</span></p>
-        </div>
+        <html>
+        <head>
+            <style>
+                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; line-height: 1.5; color: #333; margin: 0; padding: 0; }}
+                .container {{ max-width: 900px; margin: 0 auto; background: #f8f9fa; padding: 15px; }}
+                .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px; text-align: center; border-radius: 8px 8px 0 0; }}
+                .header h1 {{ margin: 0; font-size: 26px; font-weight: 700; }}
+                .content {{ background: white; padding: 25px; border-radius: 0 0 8px 8px; }}
+                .status {{ background: #e8f5e9; color: #2e7d32; padding: 12px; margin: 15px 0; border-radius: 5px; text-align: center; font-weight: 600; font-size: 15px; }}
+                .booking-bar {{ display: flex; justify-content: space-between; align-items: center; background: #f0f7ff; border-left: 4px solid #667eea; padding: 12px 15px; margin: 15px 0; border-radius: 5px; }}
+                .booking-label {{ color: #666; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }}
+                .booking-value {{ font-size: 18px; font-weight: 700; color: #667eea; }}
+                .route-section {{ background: #f8f9fa; border-radius: 6px; padding: 15px; margin: 15px 0; }}
+                .route-header {{ font-size: 13px; color: #667eea; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; border-bottom: 2px solid #667eea; padding-bottom: 8px; }}
+                .route-flow {{ display: flex; justify-content: space-between; align-items: center; gap: 10px; }}
+                .route-item {{ flex: 1; text-align: center; padding: 10px; }}
+                .route-icon {{ font-size: 28px; margin-bottom: 5px; }}
+                .route-label {{ color: #999; font-size: 10px; text-transform: uppercase; margin-bottom: 3px; }}
+                .route-text {{ font-size: 13px; font-weight: 600; color: #333; }}
+                .connector {{ font-size: 20px; color: #ddd; margin-top: 20px; }}
+                .details-bar {{ display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr; gap: 10px; margin: 15px 0; }}
+                .detail-box {{ background: #f8f9fa; padding: 10px; border-radius: 5px; text-align: center; }}
+                .detail-label {{ color: #666; font-size: 10px; text-transform: uppercase; }}
+                .detail-value {{ font-size: 14px; font-weight: 700; color: #667eea; margin-top: 3px; }}
+                .detail-value.vehicle {{ color: #333; }}
+                .driver-section {{ background: #f0f7ff; border-left: 4px solid #667eea; border-radius: 6px; padding: 15px; margin: 15px 0; display: flex; gap: 15px; }}
+                .driver-pic {{ width: 80px; height: 80px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-size: 40px; flex-shrink: 0; }}
+                .driver-info {{ flex: 1; }}
+                .driver-header {{ font-size: 13px; color: #667eea; font-weight: 700; text-transform: uppercase; margin-bottom: 10px; }}
+                .driver-name {{ font-size: 18px; font-weight: 700; color: #333; }}
+                .driver-number {{ font-size: 14px; color: #667eea; margin-top: 5px; font-weight: 600; }}
+                .driver-number a {{ color: #667eea; text-decoration: none; }}
+                .driver-number a:hover {{ text-decoration: underline; }}
+                .info-bar {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 15px 0; }}
+                .info-item {{ background: #f8f9fa; padding: 12px; border-radius: 5px; }}
+                .info-label {{ color: #666; font-size: 11px; text-transform: uppercase; }}
+                .info-value {{ font-size: 14px; font-weight: 600; color: #333; margin-top: 4px; word-break: break-all; }}
+                .helpline-box {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border-radius: 6px; margin: 15px 0; text-align: center; }}
+                .helpline-label {{ font-size: 12px; text-transform: uppercase; opacity: 0.9; }}
+                .helpline-number {{ font-size: 18px; font-weight: 700; margin-top: 8px; }}
+                .helpline-number a {{ color: white; text-decoration: none; }}
+                .helpline-number a:hover {{ text-decoration: underline; }}
+                .footer {{ text-align: center; padding: 15px; color: #999; font-size: 11px; border-top: 1px solid #eee; margin-top: 20px; }}
+                .footer a {{ color: #667eea; text-decoration: none; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>⭐ Star Skyline Limousine</h1>
+                </div>
+                
+                <div class="content">
+                    <p>Hi <strong>Admin</strong>,</p>
+                    
+                    <div class="status">✅ 📞 New Booking Received via Bareerah AI.</div>
+                    
+                    <div class="booking-bar">
+                        <div>
+                            <div class="booking-label">Booking Reference</div>
+                            <div class="booking-value">{bk_ref}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="route-section">
+                        <div class="route-header">📍 Route & Time</div>
+                        <div class="route-flow">
+                            <div class="route-item">
+                                <div class="route-icon">📤</div>
+                                <div class="route-label">Pickup Location</div>
+                                <div class="route-text">{p}</div>
+                            </div>
+                            <div class="connector">→</div>
+                            <div class="route-item">
+                                <div class="route-icon">⏰</div>
+                                <div class="route-label">Pickup Time</div>
+                                <div class="route-text">{state['slots'].get('pickup_time', 'Pending')}</div>
+                            </div>
+                            <div class="connector">→</div>
+                            <div class="route-item">
+                                <div class="route-icon">📥</div>
+                                <div class="route-label">Dropoff Location</div>
+                                <div class="route-text">{d}</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="details-bar">
+                        <div class="detail-box">
+                            <div class="detail-label">Vehicle Type</div>
+                            <div class="detail-value vehicle">{v_type}</div>
+                        </div>
+                        <div class="detail-box">
+                            <div class="detail-label">Car Model</div>
+                            <div class="detail-value vehicle">{car_model}</div>
+                        </div>
+                        <div class="detail-box">
+                            <div class="detail-label">Distance</div>
+                            <div class="detail-value">{base_dist} km</div>
+                        </div>
+                        <div class="detail-box">
+                            <div class="detail-label">Passengers</div>
+                            <div class="detail-value">{pax}</div>
+                        </div>
+                        <div class="detail-box">
+                            <div class="detail-label">Luggage</div>
+                            <div class="detail-value">{lug}</div>
+                        </div>
+                        <div class="detail-box">
+                            <div class="detail-label">Total Fare</div>
+                            <div class="detail-value">AED {fare}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="driver-section">
+                        <div class="driver-pic">👨💼</div>
+                        <div class="driver-info">
+                            <div class="driver-header">🚗 Driver Status</div>
+                            <div class="driver-name">Pending Assignment</div>
+                            <div class="driver-number">📞 <a href="tel:N/A">N/A</a></div>
+                        </div>
+                    </div>
+                    
+                    <div class="info-bar">
+                        <div class="info-item">
+                            <div class="info-label">👤 Customer Name</div>
+                            <div class="info-value">{state['slots'].get('customer_name', 'Not Provided')}</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">📞 Phone</div>
+                            <div class="info-value">{request.values.get('From', 'N/A')}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="helpline-box">
+                        <div class="helpline-label">Need Help? Contact Management</div>
+                        <div class="helpline-number"><a href="tel:+971501234567">+971 50 123 4567</a></div>
+                    </div>
+                    
+                    <p style="margin-top: 30px; color: #666; font-size: 14px;">
+                        ✅ Booking has been synced to the primary backend.<br>
+                        ⏱️ Admin follow-up required for driver assignment.
+                    </p>
+                    
+                    <div class="footer">
+                        <p>Star Skyline Limousine Service • Dubai, UAE<br>
+                        <a href="https://starskyline.ae">Visit our website</a> | 
+                        <a href="tel:+971501234567">Call us</a></p>
+                        <p>Booking Timestamp: {timestamp}</p>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
         """
-        send_email(f"🚀 NEW BOOKING: {state['slots'].get('customer_name')}", email_body)
+        send_email(f"🚀 NEW BOOKING: {state['slots'].get('customer_name', 'Guest')}", email_body)
         
         ai_msg = f"Great. I have booked the {car_model} for {fare} Dirhams. You will receive a confirmation shortly. Goodbye!"
         resp = VoiceResponse()
