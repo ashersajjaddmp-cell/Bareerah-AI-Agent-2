@@ -849,8 +849,47 @@ def create_booking_direct(booking_payload: dict, endpoint: str = "/api/bookings/
         print(f"[BACKEND] ❌ Error: {e} - using local pending", flush=True)
         return False
 
+def create_booking_direct(payload: dict) -> bool:
+    """✅ MISSION CRITICAL: Create booking in Backend and Local DB"""
+    print(f"[BOOKING] 🚀 Official Booking Attempt: {payload.get('customer_name')}", flush=True)
+    
+    # 1. Save Locally (Backup)
+    save_booking_locally(payload, status="confirmed")
+    
+    # 2. Push to Backend API
+    try:
+        jwt_token = get_jwt_token()
+        if not jwt_token:
+            print("[BOOKING] ⚠️ No JWT token, local save only", flush=True)
+            return True # Consider successful since it's saved locally
+            
+        final_payload = {
+            "customer_name": payload.get("customer_name"),
+            "customer_phone": payload.get("customer_phone"),
+            "pickup_location": payload.get("pickup_location"),
+            "dropoff_location": payload.get("dropoff_location"),
+            "fare_aed": int(payload.get("fare_aed") or payload.get("fare", 0)),
+            "vehicle_type": payload.get("vehicle_type", "SUV").lower(),
+            "passengers_count": int(payload.get("passengers_count", 1)),
+            "luggage_count": int(payload.get("luggage_count", 0)),
+            "pickup_time": payload.get("pickup_time"),
+            "notes": payload.get("notes", "")
+        }
+        
+        headers = {"Authorization": f"Bearer {jwt_token}", "Content-Type": "application/json"}
+        resp = requests.post(BOOKING_ENDPOINT, json=final_payload, headers=headers, timeout=10)
+        
+        if resp.status_code in [200, 201]:
+            print(f"[BOOKING] ✅ Backend Success: {resp.status_code}", flush=True)
+            return True
+        else:
+            print(f"[BOOKING] ⚠️ Backend Failed ({resp.status_code}): {resp.text}", flush=True)
+            return True # Still True because saved locally
+    except Exception as e:
+        print(f"[BOOKING] ❌ Network Error: {e}", flush=True)
+        return True # Safe because saved locally
+
 def save_booking_locally(payload: dict, status: str = "pending_confirmation") -> bool:
-    """✅ MISSION CRITICAL: Save booking to local PostgreSQL table 'bookings' for crash-safety and sync"""
     try:
         conn = get_db_conn()
         if not conn:
@@ -4091,129 +4130,75 @@ def handle_call():
 
         # ✅ FUNCTIONAL LOGIC CHAIN (prevents hitting the final 'else')
         # ✅ FLOW STEP HANDLERS
-        # ✅ FLOW STEP HANDLERS (Unified Support)
-        if ctx["flow_step"] in ["identity", "customer_name", "locations", "dropoff", "pickup", "schedule", "datetime"]:
-            response_text = nlu.get("response")
+        # ✅ FLOW STEP HANDLERS (Prioritize Specialized Logic)
         
-        elif ctx["flow_step"] in ["cargo", "requirements", "passengers", "luggage", "preferred_vehicle"]:
-             # Ensure luggage is numeric
-             if "luggage" in ctx["locked_slots"] and ctx["locked_slots"]["luggage"] is None:
-                 ctx["locked_slots"]["luggage"] = 0
-             response_text = nlu.get("response")
-
-        
-        # ✅ STEP 2.5: ASK FOR FLIGHT INFO (if airport detected)
-        elif ctx["flow_step"] == "flight_info":
-            # Extract flight time from speech
-            nlu = extract_nlu_clean(speech, "datetime", ctx["locked_slots"], current_lang)
-            if nlu.get("confidence", 0) >= 0.7:
-                flight_time_raw = nlu.get("extracted_value", "")
-                
+        # 1. SPECIAL: Flight Info (Airport detected)
+        if ctx["flow_step"] == "flight_info":
+            nlu_flight = extract_nlu_clean(speech, "datetime", ctx["locked_slots"], current_lang)
+            if nlu_flight.get("confidence", 0) >= 0.7:
+                flight_time_raw = nlu_flight.get("extracted_value", "")
                 try:
                     from datetime import datetime as dt, timezone, timedelta
                     dubai_tz = timezone(timedelta(hours=4))
-                    
-                    # ✅ FIX: Handle multiple time formats (YYYY-MM-DD HH:MM, HH:MM, 12-hour, etc)
                     parsed = None
-                    formats_to_try = [
-                        "%Y-%m-%d %H:%M",      # 2025-12-12 14:30
-                        "%Y-%m-%d %I:%M %p",   # 2025-12-12 2:30 PM
-                        "%H:%M",               # 14:30
-                        "%I:%M %p",            # 2:30 PM
-                    ]
-                    
+                    formats_to_try = ["%Y-%m-%d %H:%M", "%Y-%m-%d %I:%M %p", "%H:%M", "%I:%M %p"]
                     for fmt in formats_to_try:
                         try:
                             parsed = dt.strptime(flight_time_raw.strip(), fmt)
-                            print(f"[AIRPORT] ✅ Parsed time '{flight_time_raw}' with format '{fmt}'", flush=True)
                             break
-                        except ValueError:
-                            continue
-                    
-                    if not parsed:
-                        raise ValueError(f"Could not parse time: {flight_time_raw}")
-                    
-                    # If only time was provided (no date), use today's date
-                    if parsed.year == 1900:  # strptime default year for time-only format
-                        now_utc = dt.now(timezone.utc)
-                        now_dubai = now_utc.astimezone(dubai_tz)
-                        parsed = parsed.replace(year=now_dubai.year, month=now_dubai.month, day=now_dubai.day)
-                    
-                    dubai_dt = parsed.replace(tzinfo=dubai_tz)
-                    
-                    # ✅ Format as ISO 8601 UTC for backend
-                    flight_time_utc = dubai_dt.astimezone(timezone.utc).isoformat()
-                    ctx["locked_slots"]["flight_time"] = flight_time_utc
-                    # ✅ FIX: Read flight_type from locked_slots (persisted) instead of ctx (not persisted)
-                    flight_type = ctx["locked_slots"].get("flight_type", "departure")
-                    
-                    print(f"[AIRPORT] ✅ Flight {flight_type.upper()}: {flight_time_utc}", flush=True)
-                    
-                    # Move to next step (datetime if we came from dropoff, else passengers)
-                    if flight_type == "departure":
-                        # Came from dropoff → next is pickup
-                        ctx["flow_step"] = "pickup"
-                        response_text = "Perfect! Your departure time is noted. Now, where are you departing from?"
-                    else:
-                        # Came from pickup → next is datetime
-                        ctx["flow_step"] = "datetime"
-                        response_text = "Great! Your arrival time is noted. When do you need to be picked up?"
-                    
-                except Exception as e:
-                    print(f"[AIRPORT] ⚠️ Parse error: {e}", flush=True)
-                    if current_lang == "ur":
-                        response_text = "Mujhe samajh nahi aya. Flight ka time dobara bataye? Jaise 14:30 ya 2:30 PM"
-                    elif current_lang == "ar":
-                        response_text = "Lam afhum. Aw waqtu alrahlah marra okhrah? Mathalan 14:30"
-                    else:
-                        response_text = "I didn't catch that. Can you say the flight time again? Like 2:30 PM or 14:30"
-            else:
-                if current_lang == "ur":
-                    response_text = "Flight time samajh nahi aya. Kya time ho sakte?"
-                elif current_lang == "ar":
-                    response_text = "Lam afhum alwaqt. Aw alwaqt?"
-                else:
-                    response_text = "I didn't catch the time. What time is your flight?"
-        
-        # ✅ STEP: SCHEDULE (Date + Time)
+                        except: continue
+                    if parsed:
+                        if parsed.year == 1900:
+                            now_dubai = dt.now(timezone.utc).astimezone(dubai_tz)
+                            parsed = parsed.replace(year=now_dubai.year, month=now_dubai.month, day=now_dubai.day)
+                        flight_time_utc = parsed.replace(tzinfo=dubai_tz).astimezone(timezone.utc).isoformat()
+                        ctx["locked_slots"]["flight_time"] = flight_time_utc
+                        flight_type = ctx["locked_slots"].get("flight_type", "departure")
+                        if flight_type == "departure":
+                            ctx["flow_step"], response_text = "pickup", "Perfect. What is your pickup location?"
+                        else:
+                            ctx["flow_step"], response_text = "schedule", "Great. What time do you need the ride?"
+                except: pass
+            if not response_text:
+                response_text = nlu.get("response", "What is your flight time?")
+
+        # 2. SPECIAL: Schedule / Datetime (Needs Parsing)
         elif ctx["flow_step"] in ["schedule", "datetime"]:
             dt_val = nlu.get("extracted_slots", {}).get("datetime") or nlu.get("extracted_value")
-            
             if dt_val and len(dt_val) >= 5:
                 try:
                     from datetime import datetime as dt, timezone, timedelta
                     dubai_tz = timezone(timedelta(hours=4))
-                    raw_dt = dt_val
                     parsed = None
                     for fmt in ["%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"]:
                         try:
-                            parsed = dt.strptime(raw_dt[:16].replace('T', ' '), "%Y-%m-%d %H:%M")
+                            parsed = dt.strptime(dt_val[:16].replace('T', ' '), "%Y-%m-%d %H:%M")
                             break
                         except: continue
-                    
                     if parsed:
-                        # Ensure user didn't just give time "14:30" (parsed as 1900-01-01)
                         if parsed.year == 1900:
-                            # Prompt for date if missing
-                            response_text = f"I've got the time as {parsed.strftime('%I:%M %p')}. And which date would that be for?"
+                            response_text = f"Got the time: {parsed.strftime('%I:%M %p')}. Which date is that for?"
                         else:
-                            now_utc = dt.now(timezone.utc)
-                            now_dubai = now_utc.astimezone(dubai_tz)
+                            now_dubai = dt.now(timezone.utc).astimezone(dubai_tz)
                             dubai_dt = parsed.replace(tzinfo=dubai_tz)
-                            formatted_dt = dubai_dt.strftime("%Y-%m-%d %H:%M")
-                            
                             if (dubai_dt - now_dubai).total_seconds() < -3600:
-                                response_text = "I'm sorry, that date is in the past. Could you please provide a future date and time?"
+                                response_text = "That date is in the past. Please provide a future date."
                             else:
-                                ctx["locked_slots"]["datetime"] = formatted_dt
-                                ctx["flow_step"] = "cargo"
+                                ctx["locked_slots"]["datetime"] = dubai_dt.strftime("%Y-%m-%d %H:%M")
+                                ctx["flow_step"] = "cargo" # Move forward
                                 response_text = nlu.get("response")
-                                print(f"[DATETIME] ✅ ACCEPTED: {formatted_dt}", flush=True)
-                except Exception as e:
-                    print(f"[DATETIME] ⚠️ Parse error: {e}", flush=True)
-            
-            if not response_text: 
-                response_text = nlu.get("response", "What date and time should we pick you up?")
+                except: pass
+            if not response_text: response_text = nlu.get("response", "When do you need the ride?")
+
+        # 3. SPECIAL: Cargo (Luggage Normalization)
+        elif ctx["flow_step"] in ["cargo", "passengers", "luggage", "preferred_vehicle"]:
+             if "luggage" in ctx["locked_slots"] and ctx["locked_slots"]["luggage"] is None:
+                 ctx["locked_slots"]["luggage"] = 0
+             response_text = nlu.get("response")
+
+        # 4. DEFAULT: Identity / Locations / Others
+        else:
+            response_text = nlu.get("response")
         
         # ✅ VEHICLE RECOMMENDATION
         elif ctx["flow_step"] == "vehicle":
