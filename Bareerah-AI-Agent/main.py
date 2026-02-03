@@ -148,11 +148,14 @@ def fetch_backend_vehicles(pax, luggage, pickup, dropoff):
 
 def sync_booking_to_backend(booking_data):
     """Sync confirmed booking to external backend"""
-    url = f"{BACKEND_BASE_URL}/api/bookings"
+    # ✅ FIX: Use the 'create-manual' endpoint which is common in your legacy code
+    url = f"{BACKEND_BASE_URL}/api/bookings/create-manual"
     try:
         print(f"🔄 Syncing booking to {url}...")
         resp = requests.post(url, json=booking_data, timeout=5)
         print(f"🔄 Sync Status: {resp.status_code}")
+        if resp.status_code != 200:
+            print(f"⚠️ Sync failed: {resp.text}")
     except Exception as e:
         print(f"❌ Sync Error: {e}")
 
@@ -172,9 +175,11 @@ def run_ai(history, slots):
     
     CRITICAL RULES:
     1. **STRICT ONE QUESTION AT A TIME**: Ask only for ONE missing piece. 
-       - Sequence: Name -> Pickup -> Dropoff -> Date & Time.
-    2. **DO NOT REPEAT**: If a slot is filled in 'Current Info', never ask for it again.
-    3. **PITCH LOGIC**: ONCE you have [customer_name, pickup_location, dropoff_location, pickup_time], output action: "confirm_pitch".
+       - Sequence: 1. Name -> 2. Pickup -> 3. Dropoff -> 4. Date & Time -> 5. Passengers & Luggage.
+    2. **LUGGAGE IS BAGS**: 'Luggage' and 'Bags' are the same. If you know one, you know the other. Never ask for both.
+    3. **PITCH LOGIC**: ONCE you have [customer_name, pickup_location, dropoff_location, pickup_time, luggage_count], output action: "confirm_pitch". 
+       - DO NOT pitch cars until you know the luggage count.
+    4. **DO NOT REPEAT**: If a slot is filled in 'Current Info', never ask for it again.
     
     Current Info: {json.dumps(slots)}
     
