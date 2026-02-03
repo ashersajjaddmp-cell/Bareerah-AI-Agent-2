@@ -69,7 +69,7 @@ def load_state(call_sid):
 
 # ✅ Utility Functions
 def get_jwt_token():
-    payload = {"role": "agent", "iat": datetime.now(timezone.utc), "exp": datetime.now(timezone.utc) + timedelta(hours=24)}
+    payload = {"role": "agent", "iat": datetime.utcnow(), "exp": datetime.utcnow() + timedelta(hours=24)}
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 def geocode_location(address):
@@ -135,21 +135,23 @@ def process_nlu(text, current_state, language="en"):
     order = ["customer_name", "dropoff", "pickup", "datetime", "passengers", "luggage", "preferred_vehicle"]
     missing = [s for s in order if s not in locked]
     
-    system_prompt = f"""You are Bareerah, a world-class limousine assistant for Star Skyline.
-ALREADY COLLECTED: {known_str}
-STRICTLY MISSING: {missing}
+    system_prompt = f"""You are Bareerah, a professional limousine assistant for Star Skyline.
+Current Status: {known_str}
+Your Goal: Help the customer book a ride by collecting all missing info: {missing}
 
 RULES:
-1. CAPTURE EVERYTHING: Extract ALL info the user provides in this sentence, even if not asked.
-2. EXTRACTION: Map user info ONLY to these keys: customer_name, dropoff, pickup, datetime, passengers, luggage, preferred_vehicle.
-3. NEXT QUESTION: Check what is still missing. Only THEN ask for the FIRST missing item.
-4. CONFIRMATION: If all info is collected, set intent to "confirm" and repeat all details back: "I have you down for [DateTime] from [Pickup] to [Dropoff]. Fare is [Fare]. Should I book it?"
+1. Always acknowledge what the user just said.
+2. If they give a location, confirm it.
+3. Be concise and polite.
+4. If they give a time without a date, ask for the date.
+5. If they are done with a group, move to the next.
+Groups: [identity: name], [locations: dropoff, pickup], [schedule: date/time], [cargo: pax, luggage, preferred car].
 
 Return JSON ONLY:
 {{
   "extracted": {{ "slot_name": "value" }},
-  "response": "Acknowledge what they said + Ask for the next missing item",
-  "intent": "continue | confirm"
+  "response": "Your spoken response",
+  "intent": "continue | cancel | confirm"
 }}"""
 
     try:
@@ -170,58 +172,34 @@ Return JSON ONLY:
 # ✅ Twilio Routes
 @app.route('/incoming', methods=['POST'])
 def incoming():
-    try:
-        resp = VoiceResponse()
-        call_sid = request.values.get('CallSid')
-        print(f"📞 Incoming Call: {call_sid}", flush=True)
-        
-        # Initialize State
-        initial_state = {
-            "flow_step": "customer_name",
-            "locked_slots": {},
-            "language": "en"
-        }
-        try:
-            save_state(call_sid, initial_state)
-        except Exception as e:
-            print(f"❌ DB ERROR in incoming: {e}", flush=True)
-            # Fallback for DB failure - still answer the call
-            pass
-        
-        gather = resp.gather(input='speech', action='/handle_new', timeout=3, enhanced=True)
-        gather.say("Welcome to Star Skyline Limousine. May I have your name please?", voice="Polly.Aditi")
-        
-        return str(resp)
-    except Exception as e:
-        print(f"🔥 CRITICAL ERROR in incoming: {e}", flush=True)
-        import traceback
-        traceback.print_exc()
-        resp = VoiceResponse()
-        resp.say("I am having technical difficulties. Please call back later.")
-        return str(resp)
+    resp = VoiceResponse()
+    call_sid = request.values.get('CallSid')
+    
+    # Initialize State
+    initial_state = {
+        "flow_step": "customer_name",
+        "locked_slots": {},
+        "language": "en"
+    }
+    save_state(call_sid, initial_state)
+    
+    gather = resp.gather(input='speech', action='/handle_new', timeout=3, enhanced=True)
+    gather.say("Welcome to Star Skyline Limousine. May I have your name please?", voice="Polly.Aditi")
+    
+    return str(resp)
 
 @app.route('/handle_new', methods=['POST'])
 def handle_new():
-    try:
-        call_sid = request.values.get('CallSid')
-        speech = request.values.get('SpeechResult', '')
-        print(f"🗣️ Speech: {speech} | SID: {call_sid}", flush=True)
-        
-        if not speech:
-            resp = VoiceResponse()
-            gather = resp.gather(input='speech', action='/handle_new', timeout=3)
-            gather.say("I'm sorry, I didn't catch that. Could you repeat?")
-            return str(resp)
+    call_sid = request.values.get('CallSid')
+    speech = request.values.get('SpeechResult', '')
+    
+    if not speech:
+        resp = VoiceResponse()
+        gather = resp.gather(input='speech', action='/handle_new', timeout=3)
+        gather.say("I'm sorry, I didn't catch that. Could you repeat?")
+        return str(resp)
 
-        try:
-            state = load_state(call_sid)
-        except Exception as e:
-            print(f"❌ DB ERROR load_state: {e}", flush=True)
-            state = None
-            
-        if not state:
-            # Fallback state if DB failed
-            state = {"flow_step": "customer_name", "locked_slots": {}, "language": "en"}
+    state = load_state(call_sid)
     if not state:
         return str(VoiceResponse().hangup())
 
@@ -229,7 +207,6 @@ def handle_new():
     nlu_result = process_nlu(speech, state)
     extracted = nlu_result.get("extracted", {})
     response_text = nlu_result.get("response")
-    print(f"[BRAIN] extracted: {extracted}", flush=True)
     
     # 2. Update State with extracted info
     for slot, val in extracted.items():
@@ -321,14 +298,6 @@ def handle_new():
     
     save_state(call_sid, state)
     return str(resp)
-    except Exception as e:
-        print(f"🔥 CRITICAL ERROR in handle_new: {e}", flush=True)
-        import traceback
-        traceback.print_exc()
-        resp = VoiceResponse()
-        resp.say("I am having technical difficulties. Please say that again.")
-        return str(resp)
 
 if __name__ == '__main__':
-    print("🚀 Force Redeploy Triggered: v2.1 Live (Hardened)", flush=True)
     app.run(host='0.0.0.0', port=5001, debug=True)
