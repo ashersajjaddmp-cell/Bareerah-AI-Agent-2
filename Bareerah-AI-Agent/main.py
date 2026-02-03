@@ -165,19 +165,31 @@ def sync_booking_to_backend(booking_data):
 # ✅ 4. AI BRAIN (The "Fluid" Part)
 def run_ai(history, slots):
     system = f"""
-    You are Bareerah, Star Skyline Limousine's AI agent.
-    Goal: Book a ride.
+    You are Bareerah, Star Skyline Limousine's AI agent. Professional and helpful.
+    
+    CRITICAL NLU EXTRACTION:
+    You must extract information into the following exact slot names:
+    - customer_name: The customer's full name.
+    - pickup_location: The starting point of the journey.
+    - dropoff_location: The destination of the journey.
+    - pickup_time: The specific date and time for the pickup.
+    - passengers_count: Number of people (default 1 if mentioned).
+    - luggage_count: Number of bags (default 0).
     
     CRITICAL RULES:
-    1. **STRICT ONE QUESTION AT A TIME**: Never ask for two things. Ask only for ONE missing piece. 
-       - Order: 1. Name -> 2. Pickup -> 3. Dropoff -> 4. Date and Time.
-    2. **DO NOT REPEAT**: If a slot is filled in 'Current Info', NEVER ask for it again.
-    3. **PITCH LOGIC**: ONCE you have [Name, Pickup, Dropoff, DateTime], output action: "confirm_pitch".
-    4. **WAIT FOR ANSWER**: After asking a question (e.g., "Where are you going?"), you MUST wait for the user. Do not proceed to the next slot until the current one is filled.
+    1. **STRICT ONE QUESTION AT A TIME**: Ask only for ONE missing piece. 
+       - Sequence: Name -> Pickup -> Dropoff -> Date & Time.
+    2. **DO NOT REPEAT**: If a slot is filled in 'Current Info', never ask for it again.
+    3. **PITCH LOGIC**: ONCE you have [customer_name, pickup_location, dropoff_location, pickup_time], output action: "confirm_pitch".
     
     Current Info: {json.dumps(slots)}
     
-    Output JSON: {{ "response": "text", "new_slots": {{key: val}}, "action": "continue|confirm_pitch|finalize" }}
+    Output JSON Format:
+    {{
+      "response": "Your spoken response",
+      "new_slots": {{ "slot_name": "extracted_value" }},
+      "action": "continue" | "confirm_pitch" | "finalize"
+    }}
     """
     try:
         # Increased history buffer to 15 to prevent loops/forgetting
@@ -241,13 +253,13 @@ def handle_call():
     
     # Logic: Present Options or Finalize
     if action == "confirm_pitch":
-        p = resolve_address(state['slots'].get('pickup', 'Dubai'))
-        d = resolve_address(state['slots'].get('dropoff', 'Dubai'))
+        p = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
+        d = resolve_address(state['slots'].get('dropoff_location', 'Dubai'))
         base_dist = calc_dist(p, d)
         
         # Fetch Real Options (Now with Route Info)
-        pax = state['slots'].get('passengers', 1)
-        lug = state['slots'].get('luggage', 0)
+        pax = state['slots'].get('passengers_count', 1)
+        lug = state['slots'].get('luggage_count', 0)
         options = fetch_backend_vehicles(pax, lug, p, d)
         
         # Construction of the Pitch
@@ -269,8 +281,8 @@ def handle_call():
         state['history'].append({"role": "assistant", "content": pitch})
 
     elif action == "finalize":
-        p = resolve_address(state['slots'].get('pickup', 'Dubai'))
-        d = resolve_address(state['slots'].get('dropoff', 'Dubai'))
+        p = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
+        d = resolve_address(state['slots'].get('dropoff_location', 'Dubai'))
         base_dist = calc_dist(p, d)
         
         # Determine Car & Price (Default Logic if not explicit)
@@ -318,10 +330,11 @@ def handle_call():
         sync_booking_to_backend({
             "customer_name": state['slots'].get('customer_name'),
             "phone": request.values.get('From'),
-            "pickup": p,
-            "dropoff": d,
-            "fare": fare,
-            "vehicle": car_model
+            "pickup_location": p,
+            "dropoff_location": d,
+            "fare_aed": fare,
+            "vehicle_model": car_model,
+            "pickup_time": state['slots'].get('pickup_time')
         })
 
         # Send Email (Admin Style)
