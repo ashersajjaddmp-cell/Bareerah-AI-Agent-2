@@ -123,47 +123,59 @@ def send_email(subject, body):
     except Exception as e:
         print(f"❌ Email Exception: {e}")
 
-def fetch_backend_vehicles(pax=1, luggage=0):
+def fetch_backend_vehicles(pax, luggage, pickup, dropoff):
     """Fetch real vehicle suggestions from Backend API"""
-    # ✅ FIX: Use the correct endpoint provided by User
     url = f"{BACKEND_BASE_URL}/api/vehicles/available"
-    print(f"🚗 Fetching cars from: {url} (pax={pax})")
+    print(f"🚗 Fetching cars from: {url} (pax={pax}, route={pickup}->{dropoff})")
     try:
-        resp = requests.get(url, params={"passengers": pax, "luggage": luggage}, timeout=5)
+        # Backend likely needs route info to calculate price/availability
+        params = {
+            "passengers": pax, 
+            "luggage": luggage,
+            "pickup_location": pickup,
+            "dropoff_location": dropoff
+        }
+        resp = requests.get(url, params=params, timeout=6)
         print(f"🚗 Backend Status: {resp.status_code}")
         
         if resp.status_code == 200:
             data = resp.json()
-            # Handle different API response structures (List vs Dict)
             vehicles = []
             if isinstance(data, list):
                 vehicles = data
             elif isinstance(data, dict):
                 vehicles = data.get("data", []) or data.get("vehicles", [])
-            
-            if vehicles:
-                return vehicles
-            else:
-                print(f"⚠️ Backend returned empty list: {data}")
-        else:
-            print(f"⚠️ Backend Error {resp.status_code}, using fallback.")
+            return vehicles
             
     except Exception as e:
         print(f"❌ Backend Fetch Error: {e}")
     return []
 
+def sync_booking_to_backend(booking_data):
+    """Sync confirmed booking to external backend"""
+    url = f"{BACKEND_BASE_URL}/api/bookings"
+    try:
+        print(f"🔄 Syncing booking to {url}...")
+        resp = requests.post(url, json=booking_data, timeout=5)
+        print(f"🔄 Sync Status: {resp.status_code}")
+    except Exception as e:
+        print(f"❌ Sync Error: {e}")
+
 # ✅ 4. AI BRAIN (The "Fluid" Part)
 def run_ai(history, slots):
     system = f"""
     You are Bareerah, Star Skyline Limousine's AI agent.
-    Goal: Book a ride. Collect: Name, Pickup, Dropoff, DateTime.
+    
+    GOAL: Complete this 3-Step Flow:
+    1. **COLLECT DETAILS**: Ask one-by-one for Name, Pickup, Dropoff, DateTime.
+    2. **PITCH OPTIONS**: When you have those 4 items, output action: "confirm_pitch". (Do not ask "what car" yet).
+    3. **FINALIZE**: The user will hear prices. When they choose a car, extract 'preferred_vehicle' and output action: "finalize".
     
     Current Info: {json.dumps(slots)}
     
-    CRITICAL RULES:
-    1. **ONE QUESTION AT A TIME**: Do NOT ask for everything at once. Ask for Name, then Pickup, then Dropoff, etc.
-    2. **Short & Natural**: Be conversational.
-    3. **PITCH LOGIC**: ONCE you have [Name, Pickup, Dropoff, DateTime], output action: "confirm_pitch".
+    Rules:
+    - If user selects a car (e.g. "The Lexus", "The first one"), set 'preferred_vehicle'.
+    - Once 'preferred_vehicle' is set -> action: "finalize".
     
     Output JSON: {{ "response": "text", "new_slots": {{key: val}}, "action": "continue|confirm_pitch|finalize" }}
     """
