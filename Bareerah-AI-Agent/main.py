@@ -92,37 +92,31 @@ def calc_dist(p, d):
     return 20.0
 
 def send_email(subject, body):
-    """Resend API via Requests"""
-    if not RESEND_API_KEY: return
-    try:
-        requests.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
-            json={"from": "Star Skyline <bookings@starskyline.ae>", "to": [NOTIFICATION_EMAIL], "subject": subject, "html": body},
-            timeout=5
-        )
-    except: pass
-
-def send_email(subject, body):
-    """Resend API via Requests"""
+    """Resend API via Requests - Consolidated & Robust"""
     if not RESEND_API_KEY: 
         print("❌ No RESEND_API_KEY found.")
         return
-    try:
-        # ✅ FIX: Use Resend's default testing domain since custom domain is unverified
-        sender_email = "onboarding@resend.dev" 
-        
-        resp = requests.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
-            json={"from": sender_email, "to": [NOTIFICATION_EMAIL], "subject": subject, "html": body},
-            timeout=10
-        )
-        print(f"📧 Email Send Status: {resp.status_code}")
-        if resp.status_code != 200:
-            print(f"❌ Email Error Details: {resp.text}")
-    except Exception as e:
-        print(f"❌ Email Exception: {e}")
+    
+    # Try sending with professional domain first, fallback to onboarding if it fails
+    senders = ["Star Skyline <onboarding@resend.dev>", "Star Skyline <bookings@starskyline.ae>"]
+    
+    for sender in senders:
+        try:
+            resp = requests.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+                json={"from": sender, "to": [NOTIFICATION_EMAIL], "subject": subject, "html": body},
+                timeout=10
+            )
+            if resp.status_code == 200:
+                print(f"📧 Email Sent Successfully via {sender}")
+                return
+            else:
+                print(f"⚠️ Email Attempt failed via {sender}: {resp.status_code}")
+                if "verify a domain" not in resp.text: # If it's not a domain error, don't just loop
+                     print(f"❌ Details: {resp.text}")
+        except Exception as e:
+            print(f"❌ Email Exception: {e}")
 
 def fetch_backend_vehicles(pax, luggage, pickup, dropoff):
     """Fetch real vehicle suggestions from Backend API"""
