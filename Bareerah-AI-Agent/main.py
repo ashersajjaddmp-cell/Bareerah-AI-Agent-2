@@ -233,8 +233,10 @@ def sync_booking_to_backend(booking_data):
         print(f"🔄 Syncing booking to {url}...")
         resp = requests.post(url, json=booking_data, headers=headers, timeout=5)
         print(f"🔄 Sync Status: {resp.status_code}")
-        if resp.status_code != 200:
+        if resp.status_code not in [200, 201]:
             print(f"⚠️ Sync failed: {resp.text}")
+        else:
+            print(f"✅ Sync successful: {resp.status_code}")
     except Exception as e:
         print(f"❌ Sync Error: {e}")
 
