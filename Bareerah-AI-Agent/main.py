@@ -125,21 +125,29 @@ def send_email(subject, body):
 
 def fetch_backend_vehicles(pax=1, luggage=0):
     """Fetch real vehicle suggestions from Backend API"""
-    url = f"{BACKEND_BASE_URL}/api/vehicles/suggest"
+    # ✅ FIX: Use the correct endpoint provided by User
+    url = f"{BACKEND_BASE_URL}/api/vehicles/available"
     print(f"🚗 Fetching cars from: {url} (pax={pax})")
     try:
         resp = requests.get(url, params={"passengers": pax, "luggage": luggage}, timeout=5)
         print(f"🚗 Backend Status: {resp.status_code}")
+        
         if resp.status_code == 200:
             data = resp.json()
-            if data.get("success") and data.get("data"):
-                return data.get("data").get("suggested_vehicles", [])
+            # Handle different API response structures (List vs Dict)
+            vehicles = []
+            if isinstance(data, list):
+                vehicles = data
+            elif isinstance(data, dict):
+                vehicles = data.get("data", []) or data.get("vehicles", [])
+            
+            if vehicles:
+                return vehicles
             else:
-                print(f"⚠️ Backend returned no data: {data}")
+                print(f"⚠️ Backend returned empty list: {data}")
         else:
             print(f"⚠️ Backend Error {resp.status_code}, using fallback.")
-            # Fallback logic handled in caller
-            return []
+            
     except Exception as e:
         print(f"❌ Backend Fetch Error: {e}")
     return []
