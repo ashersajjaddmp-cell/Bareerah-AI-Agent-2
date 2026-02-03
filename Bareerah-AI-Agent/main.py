@@ -20,6 +20,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "https://star-skyline-production.up.railway.app")
 NOTIFICATION_EMAIL = "ashersajjad.dmp@gmail.com"
 
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -101,6 +102,19 @@ def send_email(subject, body):
         )
     except: pass
 
+def fetch_backend_vehicles(pax=1, luggage=0):
+    """Fetch real vehicle suggestions from Backend API"""
+    url = f"{BACKEND_BASE_URL}/api/vehicles/suggest"
+    try:
+        resp = requests.get(url, params={"passengers": pax, "luggage": luggage}, timeout=4)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("success") and data.get("data"):
+                return data.get("data").get("suggested_vehicles", [])
+    except Exception as e:
+        logging.error(f"Backend API Error: {e}")
+    return []
+
 # ✅ 4. AI BRAIN (The "Fluid" Part)
 def run_ai(history, slots):
     system = f"""
@@ -132,7 +146,7 @@ def run_ai(history, slots):
 
 @app.route('/', methods=['GET'])
 def index():
-    return "Bareerah Fluid AI V4 Running 🚀"
+    return "Bareerah Fluid AI V5 (Real Backend) Running 🚀"
 
 # ✅ ROUTE MATCHING: /voice AND /incoming -> Entry Point
 @app.route('/voice', methods=['POST'])
@@ -183,23 +197,40 @@ def handle_call():
         
         # Check available vehicles from Backend
         available_vehicles = []
+        base_dist = calc_dist(p, d)
+        
+        # 1. Try fetching REAL data
         try:
-           # Assuming backend has an endpoint like /api/vehicles/quote
-           # For now, we simulate multiple options based on our calc
-           base_dist = calc_dist(p, d)
+           pax = state['slots'].get('passengers', 1)
+           lug = state['slots'].get('luggage', 0)
+           real_options = fetch_backend_vehicles(pax, lug)
+           if real_options:
+               # Map backend format to our simple format
+               available_vehicles = []
+               for v in real_options:
+                   # Backend might return base price, we calculate total
+                   price = v.get('base_price', 50) + (base_dist * v.get('rate_per_km', 3.5))
+                   available_vehicles.append({"model": v.get('model', 'Car'), "price": int(price)})
+        except: pass
+
+        # 2. Fallback if backend empty/fails
+        if not available_vehicles:
            available_vehicles = [
                {"model": "Lexus ES", "price": int(50 + (base_dist * 3.5))},
                {"model": "GMC Yukon", "price": int(80 + (base_dist * 5.0))},
                {"model": "Mercedes V-Class", "price": int(90 + (base_dist * 6.0))}
            ]
-        except:
-           available_vehicles = [{"model": "Standard Sedan", "price": 100}]
 
         # Basic Selection (Default to first if not specific)
         selected_car = available_vehicles[0] 
         pref = state['slots'].get('preferred_vehicle', '').lower()
-        if 'suv' in pref or 'ukon' in pref: selected_car = available_vehicles[1]
-        elif 'van' in pref or 'mercedes' in pref: selected_car = available_vehicles[2]
+        
+        # Intelligent matching against dynamic list
+        for car in available_vehicles:
+            cm = car['model'].lower()
+            if pref in cm or (('suv' in pref or 'ukon' in pref) and 'gmc' in cm) or (('van' in pref or 'mercedes' in pref) and 'mercedes' in cm):
+                selected_car = car
+                break
         
         fare = selected_car['price']
         car_model = selected_car['model']
@@ -207,13 +238,10 @@ def handle_call():
         # Save Booking (Fixed Column Name)
         if conn:
             with conn.cursor() as cur:
-                # Assuming 'phone' column might be named 'customer_phone' or similar in legacy DB
-                # If unsure, we check schema. For now, we'll try to use specific known columns
                 try:
                     cur.execute("INSERT INTO bookings (customer_name, phone, pickup, dropoff, fare, status) VALUES (%s, %s, %s, %s, %s, 'CONFIRMED')",
                                 (state['slots'].get('customer_name'), request.values.get('From'), p, d, str(fare)))
                 except Exception as e:
-                    # Fallback if 'phone' column is missing or named differently
                     cur.connection.rollback()
                     cur.execute("INSERT INTO bookings (customer_name, pickup, dropoff, fare, status) VALUES (%s, %s, %s, %s, 'CONFIRMED')",
                                 (state['slots'].get('customer_name'), p, d, str(fare)))
