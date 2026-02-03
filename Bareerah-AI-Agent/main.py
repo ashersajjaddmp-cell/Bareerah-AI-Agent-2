@@ -129,7 +129,7 @@ def run_ai(history, slots):
     3. Any car = "Standard Sedan".
     4. Once all 5 slots filled -> action: "finalize".
     
-    Output JSON: {{ "response": "text", "new_slots": {{key: val}}, "action": "continue|finalize" }}
+    Output JSON: {{ "response": "text", "new_slots": {{key: val}}, "action": "continue|confirm_pitch|finalize" }}
     """
     try:
         resp = client.chat.completions.create(
@@ -190,86 +190,72 @@ def handle_call():
     ai_msg = decision.get('response', 'Understood.')
     action = decision.get('action', 'continue')
     
-    # Finalize Logic
-    if action == "finalize":
+    # Logic: Present Options or Finalize
+    if action == "confirm_pitch":
         p = resolve_address(state['slots'].get('pickup', 'Dubai'))
         d = resolve_address(state['slots'].get('dropoff', 'Dubai'))
-        
-        # Check available vehicles from Backend
-        available_vehicles = []
         base_dist = calc_dist(p, d)
         
-        # 1. Try fetching REAL data
-        try:
-           pax = state['slots'].get('passengers', 1)
-           lug = state['slots'].get('luggage', 0)
-           real_options = fetch_backend_vehicles(pax, lug)
-           if real_options:
-               # Map backend format to our simple format
-               available_vehicles = []
-               for v in real_options:
-                   # Backend might return base price, we calculate total
-                   price = v.get('base_price', 50) + (base_dist * v.get('rate_per_km', 3.5))
-                   available_vehicles.append({"model": v.get('model', 'Car'), "price": int(price)})
-        except: pass
-
-        # 2. Fallback if backend empty/fails
-        if not available_vehicles:
-           available_vehicles = [
-               {"model": "Lexus ES", "price": int(50 + (base_dist * 3.5))},
-               {"model": "GMC Yukon", "price": int(80 + (base_dist * 5.0))},
-               {"model": "Mercedes V-Class", "price": int(90 + (base_dist * 6.0))}
-           ]
-
-        # Basic Selection (Default to first if not specific)
-        selected_car = available_vehicles[0] 
-        pref = state['slots'].get('preferred_vehicle', '').lower()
+        # Fetch Real Options
+        options = fetch_backend_vehicles(state['slots'].get('passengers', 1))
         
-        # Intelligent matching against dynamic list
-        for car in available_vehicles:
-            cm = car['model'].lower()
-            if pref in cm or (('suv' in pref or 'ukon' in pref) and 'gmc' in cm) or (('van' in pref or 'mercedes' in pref) and 'mercedes' in cm):
-                selected_car = car
-                break
+        # Construction of the Pitch
+        if options:
+            pitch = "I have checked availability. "
+            for v in options[:2]: # Top 2
+                price = int(v.get('base_price', 50) + (base_dist * v.get('rate_per_km', 3.5)))
+                pitch += f"A {v['model']} is {price} Dirhams. "
+            pitch += "Which one would you like to book?"
+        else:
+            # Fallback Pitch
+            sedan_price = int(50 + (base_dist * 3.5))
+            suv_price = int(80 + (base_dist * 5.0))
+            pitch = f"I have a Lexus ES for {sedan_price} Dirhams or a GMC Yukon for {suv_price} Dirhams. Which do you prefer?"
         
-        fare = selected_car['price']
-        car_model = selected_car['model']
+        # Override AI response with accurate pricing pitch
+        ai_msg = pitch
+        state['history'].append({"role": "assistant", "content": pitch})
+
+    elif action == "finalize":
+        p = resolve_address(state['slots'].get('pickup', 'Dubai'))
+        d = resolve_address(state['slots'].get('dropoff', 'Dubai'))
+        base_dist = calc_dist(p, d)
+        
+        # Determine Car & Price (Default Logic if not explicit)
+        pref = state['slots'].get('preferred_vehicle', 'Lexus').lower()
+        if 'suv' in pref or 'gmc' in pref:
+             car_model = "GMC Yukon"
+             fare = int(80 + (base_dist * 5.0))
+        elif 'van' in pref:
+             car_model = "Mercedes V-Class"
+             fare = int(90 + (base_dist * 6.0))
+        else:
+             car_model = "Lexus ES"
+             fare = int(50 + (base_dist * 3.5))
 
         # Save Booking (Flexible Schema)
         if conn:
             try:
                 with conn.cursor() as cur:
                     # Generic insert that adapts to likely column names
-                    # 1. Try modern schema
                     try:
                          cur.execute("INSERT INTO bookings (customer_name, phone, pickup, dropoff, fare, status) VALUES (%s, %s, %s, %s, %s, 'CONFIRMED')",
                                     (state['slots'].get('customer_name'), request.values.get('From'), p, d, str(fare)))
                     except Exception:
                         cur.connection.rollback()
-                        # 2. Try legacy schema (maybe it uses different column names or simple structure)
-                        # We will try a very minimal insert or just skip to email if DB is messed up
                         try:
                            cur.execute("INSERT INTO bookings (customer_name, fare, status) VALUES (%s, %s, 'CONFIRMED')",
                                     (state['slots'].get('customer_name'), str(fare)))
                         except:
                            cur.connection.rollback()
-                           logging.error("❌ DB Insert Failed completely. Proceeding to Email.")
                 conn.commit()
             except Exception as e:
                 logging.error(f"DB Error: {e}")
 
-        # Send Email (Critical Step)
-        email_body = f"""
-        <h2>✅ Booking Confirmed</h2>
-        <p><strong>Customer:</strong> {state['slots'].get('customer_name')}</p>
-        <p><strong>Phone:</strong> {request.values.get('From')}</p>
-        <p><strong>Car:</strong> {car_model}</p>
-        <p><strong>Route:</strong> {p} to {d}</p>
-        <p><strong>Fare:</strong> AED {fare}</p>
-        """
-        send_email("New Booking Confirmed", email_body)
+        # Send Email
+        send_email("Booking Confirmed", f"<p>Name: {state['slots'].get('customer_name')}<br>Car: {car_model}<br>Fare: AED {fare}</p>")
         
-        ai_msg = f"I have booked a {car_model} from {p} to {d}. The total fare is {fare} Dirhams. Thank you for choosing Star Skyline."
+        ai_msg = f"Great. I have booked the {car_model} for {fare} Dirhams. You will receive a confirmation shortly. Goodbye!"
         resp = VoiceResponse()
         resp.say(ai_msg, voice='Polly.Joanna-Neural')
         resp.hangup()
