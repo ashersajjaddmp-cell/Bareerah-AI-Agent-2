@@ -3676,6 +3676,7 @@ RESPONSE RULES:
 4. NEXT STEP: Identify the first group with missing info. 
    - If schedule is missing date OR time, ask for the missing part specifically.
    - For cargo, ask for passengers, luggage count, and if they have a preferred car (Sedan/SUV).
+   - If the user says they don't care about the car type, set "preferred_vehicle" to "any".
 
 Return JSON:
 {{
@@ -4123,7 +4124,7 @@ def handle_call():
         # ✅ MULTI-EXTRACTION: Save identified slots
         if nlu.get("extracted_slots"):
             for slot, val in nlu["extracted_slots"].items():
-                if val:
+                if val is not None:
                     ctx["locked_slots"][slot] = val
                     print(f"[BRAIN] ✅ Extracted {slot}: {val}", flush=True)
 
