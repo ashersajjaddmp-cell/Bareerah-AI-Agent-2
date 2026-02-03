@@ -61,46 +61,16 @@ NOTIFICATION_EMAILS = [
     "ashersajjad.dmp@gmail.com"  # ✅ PRIMARY: Verified email for Resend testing mode
 ]
 
-# ✅ Detect if location is an airport
-def is_airport_location(location_text):
-    if not location_text: return False
-    text_lower = location_text.lower()
-    return any(kw in text_lower for kw in ["airport", "terminal", "dxb", "dwc", "auh", "flight"])
-
-def transliterate_hindi_to_roman(text):
-    """Simple passthrough for logs (removing bloat)"""
-    return text
-
 def is_airport_location(location_text):
     """✅ Detect if location is an airport (Dubai International, Al Maktoum, etc)"""
-    if not location_text:
-        return False
+    if not location_text: return False
     text_lower = location_text.lower()
-    airport_keywords = [
-        "airport", "dxb", "dwc", "auh", "terminal", "emirates", "flydubai", "etihad",
-        "dubai international", "maktoum", "international airport", "civil aviation",
-        "al maktoum", "ras al khaimah", "sharjah", "fujairah", "ajman",
-        "arrivals", "departures", "check-in", "gates"
-    ]
+    airport_keywords = ["airport", "dxb", "dwc", "auh", "terminal", "maktoum", "international airport"]
     return any(kw in text_lower for kw in airport_keywords)
 
 def transliterate_hindi_to_roman(text):
-    """Convert Hindi/Urdu script to Roman transliteration (e.g., 'रमीज़' → 'Rameez')"""
-    if not text:
-        return text
-    
-    result = []
-    for char in text:
-        if char in HINDI_URDU_TRANSLITERATION:
-            result.append(HINDI_URDU_TRANSLITERATION[char])
-        elif char.isascii():
-            result.append(char)
-        # Skip unknown Unicode characters (like combining marks)
-    
-    transliterated = ''.join(result)
-    # Clean up: remove extra spaces, capitalize first letter
-    transliterated = ' '.join(transliterated.split())
-    return transliterated.strip()
+    """Simple passthrough (Dictionary removed for performance)"""
+    return text
 
 def detect_skip_intent(text):
     """✅ ENHANCED MULTILINGUAL SKIP DETECTION - regex patterns + synonym lists"""
@@ -4132,8 +4102,12 @@ def handle_call():
         # ✅ FLOW STEP HANDLERS
         # ✅ FLOW STEP HANDLERS (Prioritize Specialized Logic)
         
+        # 0. COMMON: Identity / Locations (Direct AI response)
+        if ctx["flow_step"] in ["identity", "customer_name", "locations", "dropoff", "pickup"]:
+            response_text = nlu.get("response")
+
         # 1. SPECIAL: Flight Info (Airport detected)
-        if ctx["flow_step"] == "flight_info":
+        elif ctx["flow_step"] == "flight_info":
             nlu_flight = extract_nlu_clean(speech, "datetime", ctx["locked_slots"], current_lang)
             if nlu_flight.get("confidence", 0) >= 0.7:
                 flight_time_raw = nlu_flight.get("extracted_value", "")
@@ -4190,17 +4164,13 @@ def handle_call():
                 except: pass
             if not response_text: response_text = nlu.get("response", "When do you need the ride?")
 
-        # 3. SPECIAL: Cargo (Luggage Normalization)
+        # 3. SPECIAL: Cargo / Requirements
         elif ctx["flow_step"] in ["cargo", "passengers", "luggage", "preferred_vehicle"]:
              if "luggage" in ctx["locked_slots"] and ctx["locked_slots"]["luggage"] is None:
                  ctx["locked_slots"]["luggage"] = 0
              response_text = nlu.get("response")
 
-        # 4. DEFAULT: Identity / Locations / Others
-        else:
-            response_text = nlu.get("response")
-        
-        # ✅ VEHICLE RECOMMENDATION
+        # 4. SPECIAL: Vehicle Recommendation
         elif ctx["flow_step"] == "vehicle":
             pax = ctx["locked_slots"].get("passengers", 1)
             lug = ctx["locked_slots"].get("luggage", 0)
