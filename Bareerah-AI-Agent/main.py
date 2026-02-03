@@ -3664,7 +3664,7 @@ def extract_nlu_clean(text, flow_step, locked_slots, lang="en"):
         known = [f"- {k.replace('_', ' ').upper()}: {v}" for k, v in locked_slots.items() if v]
         known_str = "\n".join(known) if known else "None - This is the start of the booking."
         
-system = f"""You are Bareerah, a fast, professional limousine assistant for Star Skyline.
+        system = f"""You are Bareerah, a fast, professional limousine assistant for Star Skyline.
 RESPONSE RULES:
 1. Extract: {known_str}
 2. Focus: {flow_step}
