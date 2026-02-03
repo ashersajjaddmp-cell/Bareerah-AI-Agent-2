@@ -22,7 +22,7 @@ GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "https://star-skyline-production.up.railway.app")
-NOTIFICATION_EMAIL = "ashersajjad.dmp@gmail.com"
+NOTIFICATION_EMAIL = "aizaz.dmp@gmail.com" # ✅ Updated to match Resend verified account
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
