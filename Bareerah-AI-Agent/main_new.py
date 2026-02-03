@@ -69,7 +69,7 @@ def load_state(call_sid):
 
 # ✅ Utility Functions
 def get_jwt_token():
-    payload = {"role": "agent", "iat": datetime.utcnow(), "exp": datetime.utcnow() + timedelta(hours=24)}
+    payload = {"role": "agent", "iat": datetime.now(timezone.utc), "exp": datetime.now(timezone.utc) + timedelta(hours=24)}
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 def geocode_location(address):
