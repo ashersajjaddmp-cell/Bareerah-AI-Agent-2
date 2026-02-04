@@ -24,6 +24,8 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "https://star-skyline-production.up.railway.app")
 NOTIFICATION_EMAIL = "aizaz.dmp@gmail.com" 
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+ELEVENLABS_VOICE_ID = "EXAVIT9j6IWWUXfXnS7G" # Bella (High Quality Multilingual)
 
 # ✅ JWT FOR BACKEND AUTH
 CACHED_TOKEN = None
@@ -298,10 +300,41 @@ def index():
 @app.route('/incoming', methods=['POST'])
 def incoming_call():
     resp = VoiceResponse()
+    # 1. First Salam and Introduction
+    resp.say("As-Salamu Alaykum. I am Ayesha.", voice='Polly.Joanna-Neural')
+    
+    # 2. Then Language Selection
     gather = resp.gather(num_digits=1, action='/select-language', timeout=5)
     gather.say("For English, press 1. Urdu ke liye, do dabaaein. Lil-lughati-al-arabiyyah, id-ghat ala raqam thalatha.", voice='Polly.Joanna-Neural')
     resp.redirect('/voice') # Repeat if no input
     return str(resp)
+
+@app.route('/eleven-tts')
+def eleven_tts():
+    text = request.args.get('text', '')
+    if not text or not ELEVENLABS_API_KEY:
+        return "Missing data", 400
+        
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json"
+    }
+    data = {
+        "text": text,
+        "model_id": "eleven_multilingual_v2",
+        "voice_settings": {"stability": 0.5, "similarity_boost": 0.5}
+    }
+    
+    try:
+        r = requests.post(url, json=data, headers=headers, timeout=10)
+        if r.status_code == 200:
+            from flask import Response
+            return Response(r.content, mimetype="audio/mpeg")
+        else:
+            return f"Error: {r.text}", r.status_code
+    except Exception as e:
+        return str(e), 500
 
 @app.route('/select-language', methods=['POST'])
 def select_language():
@@ -330,7 +363,15 @@ def select_language():
     tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
     
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map[selected_lang])
-    gather.say(greetings[selected_lang], voice=voice_map[selected_lang])
+    
+    # High Quality Urdu via Play (ElevenLabs)
+    if selected_lang == "Urdu":
+        # Encode text for URL
+        from urllib.parse import quote
+        audio_url = f"{request.url_root.replace('http:', 'https:')}eleven-tts?text={quote(greetings['Urdu'])}"
+        gather.play(audio_url)
+    else:
+        gather.say(greetings[selected_lang], voice=voice_map[selected_lang])
     return str(resp)
 
 # ✅ ROUTE MATCHING: /handle -> Main Logic
@@ -689,9 +730,17 @@ def handle_call():
     voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zayd-Neural"}
     tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
     
+    
     resp = VoiceResponse()
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map.get(lang, "en-US"))
-    gather.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
+    
+    if lang == "Urdu":
+        from urllib.parse import quote
+        audio_url = f"{request.url_root.replace('http:', 'https:')}eleven-tts?text={quote(ai_msg)}"
+        gather.play(audio_url)
+    else:
+        gather.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
+        
     resp.redirect('/handle')
     return str(resp)
 
