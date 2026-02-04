@@ -241,11 +241,22 @@ def fetch_backend_vehicles(pax, luggage):
             # ✅ Handle diverse backend structures
             if isinstance(data, dict):
                 v_list = data.get("suggested_vehicles") or data.get("data", {}).get("suggested_vehicles") or data.get("vehicles", [])
-                if not v_list:
-                     print(f"❓ No cars in JSON structure: {data}")
-                return v_list
-            if isinstance(data, list):
-                return data
+            elif isinstance(data, list):
+                v_list = data
+            else: v_list = []
+            
+            # --- STRICT CAPACITY FILTER ---
+            if int(pax) > 4:
+                # If 5+ Pax, remove Sedans/Execs entirely to avoid suggestion confusion
+                filtered = [v for v in v_list if v.get('max_passengers', 4) >= int(pax)]
+                # If backend didn't filter, do it manually
+                if filtered: return filtered
+                
+                # Fallback if list empty but pax high (Force Van)
+                return [{"vehicle_type": "elite_van", "model": "Mercedes V Class", "base_fare": 165}]
+            
+            return v_list
+
     except Exception as e:
         print(f"⚠️ Suggest API Exception: {e}")
     
@@ -551,12 +562,18 @@ def handle_call():
         elif 'executive' in pref or 'business' in pref or 'vip' in pref:
              car_model = "Executive Sedan"
              v_type = "EXECUTIVE"
-        elif 'suv' in pref or 'gmc' in pref:
-             car_model = "SUV"
-             v_type = "SUV"
-        elif 'van' in pref or 'v-class' in pref:
+        elif 'elite' in pref or 'v-class' in pref or 'mercedes van' in pref:
+             car_model = "Mercedes V Class"
+             v_type = "ELITE_VAN"  # Explicitly match your backend "ELITE VAN"
+        elif 'van' in pref: # Generic Van
              car_model = "Luxury Van"
-             v_type = "VAN"
+             v_type = "ELITE_VAN" # Default generic van to Elite logic usually safer
+        elif 'minibus' in pref or 'bus' in pref:
+             car_model = "Luxury Minibus"
+             v_type = "MINI_BUS"
+        elif 'suv' in pref or 'gmc' in pref or 'yukon' in pref:
+             car_model = "Luxury SUV"
+             v_type = "LUXURY_SUV" # Matches your backend logic better than generic SUV
         elif 'first class' in pref:
              car_model = "First Class"
              v_type = "FIRST_CLASS"
