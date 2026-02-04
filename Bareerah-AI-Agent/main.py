@@ -257,9 +257,10 @@ def run_ai(history, slots):
     CRITICAL RULES:
     1. **STRICT ONE QUESTION AT A TIME**: Ask only for ONE missing piece. 
        - Sequence: 1. Name -> 2. Pickup -> 3. Dropoff -> 4. Date & Time -> 5. Passengers & Luggage.
-    2. **LUGGAGE IS BAGS**: 'Luggage' and 'Bags' are the same. If you know one, you know the other. Never ask for both.
-    3. **PITCH LOGIC**: ONCE you have [customer_name, pickup_location, dropoff_location, pickup_time, luggage_count], output action: "confirm_pitch". 
-       - DO NOT pitch cars until you know the luggage count.
+    2. **LUGGAGE IS BAGS**: Extracted values must be integers. "Four bags" = 4. 
+    3. **NO LOOPING**: Once a slot is filled, NEVER ask for it again. If you just got the luggage count, you now have everything. You MUST set action to "confirm_pitch".
+    4. **PITCH LOGIC**: When action is "confirm_pitch", do not speak the prices yourself yet. Just say something like "Let me check the availability for you." and the system will handle the rest.
+    5. **EMPTY INPUT**: If the user says nothing or it's silent, just say "I'm still here, please tell me your luggage count or pickup details."
        - The user will choose a car from your options. When they pick one, extract it as 'preferred_vehicle' and action: "finalize".
     4. **DO NOT REPEAT**: If a slot is filled in 'Current Info', never ask for it again.
     
@@ -305,7 +306,7 @@ def incoming_call():
         conn.commit()
     
     resp = VoiceResponse()
-    gather = resp.gather(input='speech', action='/handle', timeout=2)
+    gather = resp.gather(input='speech', action='/handle', timeout=5)
     gather.say("Welcome to Star Skyline. I am Bareerah. May I have your name?", voice='Polly.Joanna-Neural')
     return str(resp)
 
@@ -331,6 +332,12 @@ def handle_call():
     state['slots'].update(decision.get('new_slots', {}))
     ai_msg = decision.get('response', 'Understood.')
     action = decision.get('action', 'continue')
+
+    # ✅ SAFETY OVERRIDE: Force Pitch if logic gets stuck
+    required = ['customer_name', 'pickup_location', 'dropoff_location', 'pickup_time', 'luggage_count']
+    if all(state['slots'].get(k) for k in required) and action == "continue":
+        print("🛠️ Safety Trigger: Forcing 'confirm_pitch' because all slots are full.")
+        action = "confirm_pitch"
     
     # Logic: Present Options or Finalize
     if action == "confirm_pitch":
@@ -650,7 +657,7 @@ def handle_call():
         conn.commit()
     
     resp = VoiceResponse()
-    gather = resp.gather(input='speech', action='/handle', timeout=2)
+    gather = resp.gather(input='speech', action='/handle', timeout=5)
     gather.say(ai_msg, voice='Polly.Joanna-Neural')
     resp.redirect('/handle')
     return str(resp)
