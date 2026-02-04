@@ -346,6 +346,7 @@ def select_language():
     
     lang_map = {"1": "English", "2": "Urdu", "3": "Arabic"}
     selected_lang = lang_map.get(digit, "English")
+    print(f"🌍 Language Selected: {selected_lang} (Digit: {digit})")
     
     state = {"history": [], "slots": {"language": selected_lang}}
     conn = get_db()
@@ -435,11 +436,12 @@ def handle_call():
                 # Get Perfect Fare from Backend
                 price = calculate_backend_fare(base_dist, v_type, b_type)
                 if not price:
-                    # Fallback to backend-provided base/rate if available
+                    # Fallback to backend-provided base/rate or hard calculation
                     if v.get('base_fare'):
                          price = int(float(v['base_fare']) + (base_dist * float(v.get('per_km_rate', 1))))
                     else:
-                         price = int(v.get('base_price', 50) + (base_dist * v.get('rate_per_km', 3.5)))
+                         # Hard Calculation based on Dubai standard rates
+                         price = int(50 + (base_dist * 3.5)) if v_type == "SEDAN" else int(80 + (base_dist * 5.0))
                 
                 pitch += f"A {v_model} for this {base_dist} kilometer journey is {price} Dirhams. "
             pitch += "Which suitable option would you like to book?"
