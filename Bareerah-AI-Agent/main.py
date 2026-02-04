@@ -255,14 +255,21 @@ def fetch_backend_vehicles(pax, luggage):
             else: v_list = []
             
             # --- STRICT CAPACITY FILTER ---
-            if int(pax) > 4:
-                # If 5+ Pax, remove Sedans/Execs entirely to avoid suggestion confusion
-                filtered = [v for v in v_list if v.get('max_passengers', 4) >= int(pax)]
-                # If backend didn't filter, do it manually
-                if filtered: return filtered
+            try:
+                pax_int = int(pax)
+            except: pax_int = 1
+
+            if pax_int > 4:
+                # 1. Filter backend list for capacity
+                filtered = [v for v in v_list if int(v.get('max_passengers', 4)) >= pax_int]
                 
-                # Fallback if list empty but pax high (Force Van)
-                return [{"vehicle_type": "elite_van", "model": "Mercedes V Class", "base_fare": 165}]
+                # 2. If no valid options found, or user has 7+ people, prioritize Vans/SUVs
+                if not filtered or pax_int >= 7:
+                     return [
+                         {"vehicle_type": "elite_van", "model": "Mercedes V Class", "base_fare": 165, "max_passengers": 7},
+                         {"vehicle_type": "mini_bus", "model": "Luxury Minibus", "base_fare": 825, "max_passengers": 12}
+                     ]
+                return filtered
             
             return v_list
 
@@ -583,37 +590,42 @@ def handle_call():
             lug = int(state['slots'].get('luggage_count', 0))
         except: lug = 0
         
-        # If user selected Classic but has > 4 pax, Force Upgrade to SUV
-        pref = state['slots'].get('preferred_vehicle', 'Car').lower()
-        if pax > 4 and any(x in pref for x in ['classic', 'executive', 'sedan', 'car']):
-            logging.info(f"⚠️ Capacity Mismatch (Pax {pax}). Upgrading {pref} to SUV.")
-            pref = "suv" # Force override logic below
+        # 1. Force Upgrade for 7+ Passengers (Must be a Van or MiniBus)
+        if pax >= 7:
+            if not any(x in pref for x in ['van', 'bus', 'sprinter', 'v-class']):
+                 logging.info(f"⚠️ High Capacity ({pax} pax). Forcing Upgrade to Elite Van.")
+                 pref = "van"
+
+        # 2. Force Upgrade for 5-6 Passengers (Must be SUV or Van)
+        elif pax > 4:
+            if any(x in pref for x in ['classic', 'executive', 'sedan', 'car', 'lexus', 'first class']):
+                logging.info(f"⚠️ Capacity Mismatch (Pax {pax}). Upgrading {pref} to SUV.")
+                pref = "suv"
 
         # Determine Car & Final Price Dynamically
         
         # Mapping Logic that respects backend types & typos
-        # Handle 'classis' typo and generic terms
         if any(x in pref for x in ['classic', 'classis', 'sedan', 'car', 'lexus', 'standard']):
              car_model = "Classic Sedan"
              v_type = "CLASSIC"
         elif 'executive' in pref or 'business' in pref or 'vip' in pref:
              car_model = "Executive Sedan"
              v_type = "EXECUTIVE"
+        elif 'first class' in pref:
+             car_model = "First Class"
+             v_type = "FIRST_CLASS"
         elif 'elite' in pref or 'v-class' in pref or 'mercedes van' in pref:
              car_model = "Mercedes V Class"
-             v_type = "ELITE_VAN"  # Explicitly match your backend "ELITE VAN"
-        elif 'van' in pref: # Generic Van
+             v_type = "ELITE_VAN" 
+        elif 'van' in pref: 
              car_model = "Luxury Van"
-             v_type = "ELITE_VAN" # Default generic van to Elite logic usually safer
+             v_type = "ELITE_VAN"
         elif 'minibus' in pref or 'bus' in pref:
              car_model = "Luxury Minibus"
              v_type = "MINI_BUS"
         elif 'suv' in pref or 'gmc' in pref or 'yukon' in pref:
              car_model = "Luxury SUV"
-             v_type = "LUXURY_SUV" # Matches your backend logic better than generic SUV
-        elif 'first class' in pref:
-             car_model = "First Class"
-             v_type = "FIRST_CLASS"
+             v_type = "LUXURY_SUV" 
         else:
              # Hard Fallback to avoid 'CAR' 0-fare error
              car_model = "Lexus ES"
