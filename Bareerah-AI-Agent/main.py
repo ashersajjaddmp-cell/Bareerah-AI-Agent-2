@@ -147,9 +147,10 @@ def send_email(subject, body):
         "Content-Type": "application/json"
     }
     
+    # Transcript is already appended to body by the caller
     payload = {
         "from": "Star Skyline <onboarding@resend.dev>",
-        "to": ["aizaz.dmp@gmail.com"], # Hardcoded for testing, user can change
+        "to": ["aizaz.dmp@gmail.com"], 
         "subject": subject,
         "html": body
     }
@@ -426,9 +427,13 @@ def handle_call():
     action = decision.get('action', 'continue')
 
     # ✅ SAFETY OVERRIDE: Force Pitch if logic gets stuck
+    # ✅ SAFETY OVERRIDE: Force Pitch ONLY if all info is there AND vehicle is NOT selected
     required = ['customer_name', 'pickup_location', 'dropoff_location', 'pickup_time', 'luggage_count']
-    if all(state['slots'].get(k) for k in required) and action == "continue":
-        print("🛠️ Safety Trigger: Forcing 'confirm_pitch' because all slots are full.")
+    # Check if preferred_vehicle is MISSING. If it's present, we don't need to pitch.
+    if  all(state['slots'].get(k) for k in required) and \
+        not state['slots'].get('preferred_vehicle') and \
+        action == "continue":
+        print("🛠️ Safety Trigger: Forcing 'confirm_pitch' because all core slots are full.")
         action = "confirm_pitch"
     
     # Logic: Present Options or Finalize
@@ -455,7 +460,11 @@ def handle_call():
                 if not isinstance(v, dict): continue
                 # The 'suggest-vehicles' API uses 'vehicle_type', regular API uses 'type'
                 v_type = v.get('vehicle_type', v.get('type', v.get('category', 'SEDAN'))).upper()
-                v_model = v.get('vehicle_type', v.get('model', v.get('vehicle', 'Car'))).replace("_", " ").title()
+                # Generic Name Logic
+                if v_type == 'CLASSIC': v_model = "Classic Sedan"
+                elif v_type == 'EXECUTIVE': v_model = "Executive Sedan"
+                elif v_type == 'SUV': v_model = "Luxury SUV"
+                else: v_model = v.get('vehicle_type', v.get('model', v.get('vehicle', 'Car'))).replace("_", " ").title()
                 
                 # Get Perfect Fare from Backend
                 price = calculate_backend_fare(base_dist, v_type, b_type)
@@ -493,19 +502,26 @@ def handle_call():
         d = resolve_address(state['slots'].get('dropoff_location', 'Dubai'))
         base_dist = calc_dist(p, d)
         
+        # Validate Capacity BEFORE Booking
         pax = state['slots'].get('passengers_count', 1)
         lug = state['slots'].get('luggage_count', 0)
-        b_type = "airport_transfer" if "airport" in (p+d).lower() else "point_to_point"
-
-        # Determine Car & Final Price Dynamically from Preference
-        pref = state['slots'].get('preferred_vehicle', 'Car').lower()
         
-        # Mapping Logic that respects backend types
-        if 'classic' in pref or 'lexus' in pref or 'sedan' in pref:
-             car_model = "Lexus ES (Classic)"
+        # If user selected Classic but has > 4 pax, Force Upgrade to SUV
+        pref = state['slots'].get('preferred_vehicle', 'Car').lower()
+        if pax > 4 and any(x in pref for x in ['classic', 'executive', 'sedan', 'car']):
+            logging.info(f"⚠️ Capacity Mismatch (Pax {pax}). Upgrading {pref} to SUV.")
+            pref = "suv" # Force override logic below
+            # Update history to reflect this change naturally? No, silent upgrade for success.
+
+        # Determine Car & Final Price Dynamically
+        
+        # Mapping Logic that respects backend types & typos
+        # Handle 'classis' typo and generic terms
+        if any(x in pref for x in ['classic', 'classis', 'sedan', 'car', 'lexus', 'standard']):
+             car_model = "Classic Sedan"
              v_type = "CLASSIC"
-        elif 'executive' in pref:
-             car_model = "GM / BMW (Executive)"
+        elif 'executive' in pref or 'business' in pref or 'vip' in pref:
+             car_model = "Executive Sedan"
              v_type = "EXECUTIVE"
         elif 'suv' in pref or 'gmc' in pref:
              car_model = "SUV"
