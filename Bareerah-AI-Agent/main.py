@@ -102,17 +102,19 @@ def init_tables():
 
 # ✅ 3. CORE LOGIC (Requests Only - No Google Lib)
 def resolve_address(addr):
-    """Google Geocoding API with Strict UAE Component Filtering"""
+    """Google Geocoding API with Strict UAE & Dubai Bias"""
     if not GOOGLE_MAPS_API_KEY: return addr
-    
-    # Don't resolve empty or weird short texts
     if len(addr) < 3: return addr
     
+    # Pre-process: If user didn't say Abu Dhabi/Sharjah, assume Dubai for city spots
+    search_query = addr
+    if not any(x in addr.lower() for x in ["dubai", "abu dhabi", "sharjah", "ajman", "rak", "fujairah"]):
+        search_query = f"{addr}, Dubai"
+
     try:
         url = "https://maps.googleapis.com/maps/api/geocode/json"
-        # Force results to be in UAE using components filter
         params = {
-            "address": addr, 
+            "address": search_query, 
             "components": "country:AE", 
             "key": GOOGLE_MAPS_API_KEY
         }
@@ -124,10 +126,7 @@ def resolve_address(addr):
     except Exception as e: 
         print(f"Geocoding Error: {e}")
 
-    # Fallback checks
-    if "dubai" not in addr.lower() and "uae" not in addr.lower() and "emirates" not in addr.lower():
-         return f"{addr}, Dubai, United Arab Emirates"
-    return addr
+    return f"{addr}, Dubai, UAE"
 
 def calc_dist(p, d):
     """Google Distance Matrix via Requests"""
