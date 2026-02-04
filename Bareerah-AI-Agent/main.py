@@ -276,8 +276,8 @@ def run_ai(history, slots):
     - If Arabic: Use professional Modern Standard Arabic or Gulf dialect.
     
     CRITICAL NLU EXTRACTION:
-    - customer_name, pickup_location, dropoff_location, pickup_time.
-    - passengers_count, luggage_count.
+    - customer_name, pickup_location, dropoff_location.
+    - pickup_time: EXACT Date AND Time (e.g. "Tomorrow at 4pm", "5th Feb 10am"). TODAY is 2026-02-04.
     - passengers_count, luggage_count.
     - preferred_vehicle: "Classic", "Executive", "SUV", "Van", "First Class".
     - extra_details: Capture any BARGAINING requests, discounts, special notes, or questions here.
@@ -433,7 +433,10 @@ def handle_call():
     # ✅ SHARED VARS for all states
     p = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
     d = resolve_address(state['slots'].get('dropoff_location', 'Dubai'))
-    base_dist = calc_dist(p, d)
+    try:
+        base_dist = calc_dist(p, d)
+    except:
+        base_dist = 20.0
     b_type = "airport_transfer" if "airport" in (p+d).lower() else "point_to_point"
 
     # ✅ SAFETY OVERRIDE: Force Pitch ONLY if all info is there AND vehicle is NOT selected
@@ -509,15 +512,19 @@ def handle_call():
         # p, d, base_dist, b_type are already calculated at top of function
         
         # Validate Capacity BEFORE Booking
-        pax = state['slots'].get('passengers_count', 1)
-        lug = state['slots'].get('luggage_count', 0)
+        try:
+            pax = int(state['slots'].get('passengers_count', 1))
+        except: pax = 1
+        
+        try:
+            lug = int(state['slots'].get('luggage_count', 0))
+        except: lug = 0
         
         # If user selected Classic but has > 4 pax, Force Upgrade to SUV
         pref = state['slots'].get('preferred_vehicle', 'Car').lower()
         if pax > 4 and any(x in pref for x in ['classic', 'executive', 'sedan', 'car']):
             logging.info(f"⚠️ Capacity Mismatch (Pax {pax}). Upgrading {pref} to SUV.")
             pref = "suv" # Force override logic below
-            # Update history to reflect this change naturally? No, silent upgrade for success.
 
         # Determine Car & Final Price Dynamically
         
