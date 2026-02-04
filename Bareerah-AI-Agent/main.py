@@ -243,7 +243,7 @@ def sync_booking_to_backend(booking_data):
 # ✅ 4. AI BRAIN (The "Fluid" Part)
 def run_ai(history, slots):
     system = f"""
-    You are Bareerah, Star Skyline Limousine's AI agent. Professional and helpful.
+    You are Ayesha, Star Skyline Limousine's AI agent. Professional and helpful.
     
     CRITICAL NLU EXTRACTION:
     You must extract information into the following exact slot names:
@@ -289,7 +289,7 @@ def run_ai(history, slots):
 
 @app.route('/', methods=['GET'])
 def index():
-    return "Bareerah Fluid AI V5 (Real Backend) Running 🚀"
+    return "Ayesha Fluid AI V5 (Real Backend) Running 🚀"
 
 # ✅ ROUTE MATCHING: /voice AND /incoming -> Entry Point
 @app.route('/voice', methods=['POST'])
@@ -307,7 +307,7 @@ def incoming_call():
     
     resp = VoiceResponse()
     gather = resp.gather(input='speech', action='/handle', timeout=5)
-    gather.say("Welcome to Star Skyline. I am Bareerah. May I have your name?", voice='Polly.Joanna-Neural')
+    gather.say("As-Salamu Alaykum. Welcome to Star Skyline. I am Ayesha. May I have your name?", voice='Polly.Joanna-Neural')
     return str(resp)
 
 # ✅ ROUTE MATCHING: /handle -> Main Logic
