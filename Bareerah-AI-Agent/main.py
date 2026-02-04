@@ -100,72 +100,43 @@ def init_tables():
         finally:
             conn.close()
 
-# ✅ 2.5 LOCAL ACCURACY MAPPING (Top 20 Dubai Spots)
-LOCATION_MAPPING = {
-    "dubai mall": "Dubai Mall, Downtown Dubai, UAE",
-    "burj khalifa": "Burj Khalifa, Downtown Dubai, UAE",
-    "dxb": "Dubai International Airport (DXB), Dubai, UAE",
-    "dubai airport": "Dubai International Airport (DXB), Dubai, UAE",
-    "mall of the emirates": "Mall of the Emirates, Al Barsha, Dubai, UAE",
-    "moe": "Mall of the Emirates, Al Barsha, Dubai, UAE",
-    "palm jumeirah": "Palm Jumeirah, Dubai, UAE",
-    "dubai marina": "Dubai Marina, Dubai, UAE",
-    "deira": "Deira, Dubai, United Arab Emirates",
-    "deira hotel": "Deira, Dubai, United Arab Emirates",
-    "stadium": "Dubai International Stadium, Dubai Sports City, UAE",
-    "dubai stadium": "Dubai International Stadium, Dubai Sports City, UAE",
-    "desert safari": "Al Awir Desert Safari Camp, Dubai, UAE",
-    "burj al arab": "Burj Al Arab, Umm Suqeim, Dubai, UAE",
-    "atlantis": "Atlantis The Palm, Palm Jumeirah, Dubai, UAE",
-    "global village": "Global Village, Sheikh Mohammed Bin Zayed Rd, Dubai, UAE",
-    "dubai frame": "Zabeel Park, Dubai, UAE",
-    "museum of the future": "Sheikh Zayed Road, Dubai, UAE",
-    "jbr": "Jumeirah Beach Residence, Dubai, UAE",
-    "bluewaters": "Bluewaters Island, Dubai, UAE",
-    "expo city": "Expo City Dubai, UAE",
-    "city walk": "City Walk, Al Wasl, Dubai, UAE"
-}
-
 # ✅ 3. CORE LOGIC (Requests Only - No Google Lib)
 def resolve_address(addr):
-    """Google Geocoding API with Strict UAE & Dubai Bias"""
+    """Returns a Place ID for 100% accurate distance calculation"""
     if not GOOGLE_MAPS_API_KEY: return addr
     if len(addr) < 3: return addr
     
-    # 1. LOCAL MAPPING CHECK (Super-Fast & Accurate)
-    norm_addr = addr.lower().strip()
-    for key, full_val in LOCATION_MAPPING.items():
-        if key in norm_addr:
-            return full_val
-
-    # 2. GOOGLE GEOCODING (Fallback)
-    # Pre-process: If user didn't say Abu Dhabi/Sharjah, assume Dubai for city spots
+    clean_addr = addr.lower().strip()
     search_query = addr
-    if not any(x in addr.lower() for x in ["dubai", "abu dhabi", "sharjah", "ajman", "rak", "fujairah"]):
-        search_query = f"{addr}, Dubai"
+    if not any(x in clean_addr for x in ["dubai", "uae", "emirates"]):
+        search_query = f"{addr}, Dubai, UAE"
 
     try:
-        url = "https://maps.googleapis.com/maps/api/geocode/json"
+        url = "https://maps.googleapis.com/maps/api/place/findplacefromtext/json"
         params = {
-            "address": search_query, 
-            "components": "country:AE", 
+            "input": search_query,
+            "inputtype": "textquery",
+            "fields": "place_id,formatted_address",
+            "locationbias": "circle:50000@25.2048,55.2708",
             "key": GOOGLE_MAPS_API_KEY
         }
         res = requests.get(url, params=params, timeout=5).json()
-        
-        if res.get("status") == "OK" and res.get("results"):
-            addr_found = res["results"][0]["formatted_address"]
-            # REJECT VAGUE RESULTS (If it just returns the country, it's useless)
-            if addr_found.strip() in ["United Arab Emirates", "UAE"]:
-                 pass # Fallback to loop/append logic below
-            else:
-                 return addr_found
-            
-    except Exception as e: 
-        print(f"Geocoding Error: {e}")
-
-    # Fallback: Hard-append Dubai to ensure we stay local
+        if res.get("status") == "OK" and res.get("candidates"):
+            # Return place_id format for Distance Matrix API
+            return f"place_id:{res['candidates'][0]['place_id']}"
+    except: pass
     return f"{addr}, Dubai, UAE"
+
+def resolve_address_text(addr):
+    """Returns human-readable text for Display/Email"""
+    if "place_id:" in addr:
+        try:
+             pid = addr.split("place_id:")[1]
+             url = f"https://maps.googleapis.com/maps/api/place/details/json"
+             res = requests.get(url, params={"place_id": pid, "fields": "formatted_address", "key": GOOGLE_MAPS_API_KEY}).json()
+             return res.get("result", {}).get("formatted_address", addr)
+        except: return addr
+    return addr
 
 def calc_dist(p, d):
     """Google Distance Matrix via Requests"""
@@ -359,10 +330,11 @@ def run_ai(history, slots):
     2. **STRICT SEQUENCE**: 1. Name -> 2. Pickup -> 3. Dropoff -> 4. **Date & Time** -> 5. Pax/Luggage.
        - When asking for time, ALWAYS say: "Could you please provide the pickup date and time?"
     3. **SMART EXTRACTION**: If the user provides a detail out of order, extract it and move to the next missing step.
+       - **LOCATION CONFIRMATION**: If the user gives a generic location like "Deira Hotel", confirm it by saying: "I've noted that. Which specific Deira hotel or area do you mean?" or "Understood, I've located Deira Hotel for you."
     4. **PITCH LOGIC**: Once you have the 6 core slots, set action to "confirm_pitch". 
-       - CRITICAL: Even if the user says "I want Classic" early, you MUST still respond with: 
-         "Great, the Classic for this [distance] kilometer journey is [price] Dirhams. Before I book it, any other requirements?"
-       - Use the 'action': 'confirm_pitch' to trigger the price-fetching logic.
+       - CRITICAL: Even if the user says "I want Classic" early, you MUST still respond with the action 'confirm_pitch' to get the dynamic price.
+       - NEVER hardcode prices. Always wait for the system to provide the pitch message.
+    5. **LANGUAGE REPEAT**: If the language is Urdu or Arabic, ensure your greeting and EVERY transition follows that language's polite norms.
     # PRE-CONFIRMATION HANDLER:
     5. **PRE-CONFIRMATION**: After user selects car, ask: "Any other requirements?". set action: "ask_reqs".
     6. **FINALIZE RULES**: 
@@ -498,10 +470,15 @@ def handle_call():
 
     # ✅ SAFETY OVERRIDE: Force Pitch if logic gets stuck
     # ✅ SHARED VARS for all states
-    p = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
-    d = resolve_address(state['slots'].get('dropoff_location', 'Dubai'))
+    p_id = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
+    d_id = resolve_address(state['slots'].get('dropoff_location', 'Dubai'))
+    
+    # Human readable versions for sync/email
+    p = resolve_address_text(p_id)
+    d = resolve_address_text(d_id)
+
     try:
-        base_dist = calc_dist(p, d)
+        base_dist = calc_dist(p_id, d_id) # Calculate using Place IDs (Accurate)
     except:
         base_dist = 20.0
     b_type = "airport_transfer" if "airport" in (p+d).lower() else "point_to_point"
@@ -528,45 +505,59 @@ def handle_call():
         # Construction of the Pitch
         logging.info(f"🚗 Options found: {type(options)} - {options}")
         
-        # Guard against KeyError: slice(None, 2, None) by strictly checking list type
         if isinstance(options, list) and len(options) > 0:
-            pitch = "I have checked the availability for you. "
-            b_type = "airport_transfer" if "airport" in (p+d).lower() else "point_to_point"
-            
-            # Use list slicing safely
+            # 1. Start with Address Confirmation
+            sel_lang = state['slots'].get('language', 'English')
+            if sel_lang == 'Urdu':
+                pitch = f"Theek hai, mujhe {p} se {d} tak ka rasta mil gaya hai. "
+            elif sel_lang == 'Arabic':
+                pitch = f"Hasanan, laqad hadadtu al-masar min {p} ila {d}. "
+            else:
+                pitch = f"I've located the route from {p} to {d}. "
+
+            pitch += "I have these options for you based on our availability: "
+            if sel_lang == 'Urdu': pitch = f"Mujhe {p} se {d} tak ke liye yeh gaariyan mili hain: "
+            elif sel_lang == 'Arabic': pitch = f"Laqad wagadtu hadihi al-khiyarat min {p} ila {d}: "
+
+            # 2. Build the list of cars
             for v in options[:2]:
                 if not isinstance(v, dict): continue
-                # The 'suggest-vehicles' API uses 'vehicle_type', regular API uses 'type'
                 v_type = v.get('vehicle_type', v.get('type', v.get('category', 'SEDAN'))).upper()
+                
                 # Generic Name Logic
                 if v_type == 'CLASSIC': v_model = "Classic Sedan"
                 elif v_type == 'EXECUTIVE': v_model = "Executive Sedan"
                 elif v_type == 'SUV': v_model = "Luxury SUV"
+                elif v_type == 'ELITE_VAN': v_model = "Mercedes V Class"
                 else: v_model = v.get('vehicle_type', v.get('model', v.get('vehicle', 'Car'))).replace("_", " ").title()
                 
-                # Get Perfect Fare from Backend
                 price = calculate_backend_fare(base_dist, v_type, b_type)
                 if not price:
-                    # Fallback to backend-provided base/rate or hard calculation
                     if v.get('base_fare'):
                          price = int(float(v['base_fare']) + (base_dist * float(v.get('per_km_rate', 1))))
                     else:
-                         # Hard Calculation based on Dubai standard rates
                          price = int(50 + (base_dist * 3.5)) if v_type == "SEDAN" else int(80 + (base_dist * 5.0))
                 
-                pitch += f"A {v_model} for this {base_dist} kilometer journey is {price} Dirhams. "
-                
-                # TRANSLATE PITCH IF NEEDED
-                sel_lang = state['slots'].get('language', 'English')
+                # APPEND to pitch (Don't overwrite!)
                 if sel_lang == 'Urdu':
-                    pitch = f"{base_dist} kilometer ke safar ke liye {v_model} ka kiraya {price} Dirham hai. "
+                    pitch += f"{base_dist} kilometer ke safar ke liye {v_model} ka kiraya {price} Dirham hai. "
                 elif sel_lang == 'Arabic':
-                    pitch = f"Sii'r {v_model} li-masafat {base_dist} kilometer huwa {price} dirham. "
-
-            pitch += "Which suitable option would you like to book?"
-        if sel_lang == 'Urdu': pitch += "Aap konsi gaadi book karna chahenge?"
-        elif sel_lang == 'Arabic': pitch += "Ayyu sayyarah tawaddu hajzaha?"
-        else: pitch += "Which suitable option would you like to book?"
+                    pitch += f"Sii'r {v_model} li-masafat {base_dist} kilometer huwa {price} dirham. "
+                else:
+                    pitch += f"A {v_model} for this {base_dist} kilometer journey is {price} Dirhams. "
+                
+            # 3. Add closing question
+            if sel_lang == 'Urdu': pitch += "Aap konsi gaadi book karna chahenge?"
+            elif sel_lang == 'Arabic': pitch += "Ayyu sayyarah tawaddu hajzaha?"
+            else: pitch += "Which option would you like to book?"
+        else:
+            # Fallback if no cars found
+            if sel_lang == 'Urdu': pitch = "Maaf kijiyega, is waqt koi gaadi dastiyab nahi hai."
+            elif sel_lang == 'Arabic': pitch = "Afwan, la tujad sayyarat mutahaha l-aan."
+            else: pitch = "I'm sorry, I couldn't find any available vehicles for your requirements at the moment."
+        
+        # Override AI response
+        ai_msg = pitch
         
         # Override AI response
         ai_msg = pitch
