@@ -612,6 +612,7 @@ def handle_call():
         # Send Email (Premium Template)
         bk_ref = f"STARS-{call_sid[-6:].upper() if call_sid else 'XXXX'}"
         now_str = datetime.now().strftime('%d %B, %I:%M %p')
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
         # Pretty Format Pickup Time
         display_time = clean_time
