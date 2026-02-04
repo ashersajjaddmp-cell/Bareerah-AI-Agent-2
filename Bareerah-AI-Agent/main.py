@@ -255,12 +255,16 @@ def run_ai(history, slots):
     - luggage_count: Number of bags (default 0).
     
     CRITICAL RULES:
-    1. **STRICT ONE QUESTION AT A TIME**: Ask only for ONE missing piece. 
-       - Sequence: 1. Name -> 2. Pickup -> 3. Dropoff -> 4. Date & Time -> 5. Passengers & Luggage.
+    1. **STRICT SEQUENCE**: You must follow this order and NEVER ask for two different steps at once:
+       Step 1: Ask for Name.
+       Step 2: Ask for Pickup Location (once Name is known).
+       Step 3: Ask for Dropoff Location (once Pickup is known).
+       Step 4: Ask for Pickup Date and Time (once Dropoff is known).
+       Step 5: Ask for Passengers AND Luggage together in ONE question (once Time is known).
     2. **LUGGAGE IS BAGS**: Extracted values must be integers. "Four bags" = 4. 
     3. **NO LOOPING**: Once a slot is filled, NEVER ask for it again. If you just got the luggage count, you now have everything. You MUST set action to "confirm_pitch".
-    4. **PITCH LOGIC**: When action is "confirm_pitch", do not speak the prices yourself yet. Just say something like "Let me check the availability for you." and the system will handle the rest.
-    5. **EMPTY INPUT**: If the user says nothing or it's silent, just say "I'm still here, please tell me your luggage count or pickup details."
+    4. **PITCH LOGIC**: When action is "confirm_pitch", just say "Perfect, let me check the available cars and fares for you."
+    5. **EMPTY INPUT**: If the user says nothing, just say "I'm still here, could you tell me your [current missing step]?"
        - The user will choose a car from your options. When they pick one, extract it as 'preferred_vehicle' and action: "finalize".
     4. **DO NOT REPEAT**: If a slot is filled in 'Current Info', never ask for it again.
     
