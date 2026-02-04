@@ -587,25 +587,29 @@ def handle_call():
             lug = int(state['slots'].get('luggage_count', 0))
         except: lug = 0
         
-        # Get user preference first
-        pref = state['slots'].get('preferred_vehicle', 'Car').lower()
+        # Get user preference first (Safe String)
+        p_val = state['slots'].get('preferred_vehicle')
+        pref = str(p_val).lower() if p_val else "car"
 
         # 1. Force Upgrade for 7+ Passengers (Must be a Van or MiniBus)
         if pax >= 7:
-            if not any(x in pref for x in ['van', 'bus', 'sprinter', 'v-class']):
+            # Explicit checks to avoid Generator Scoping issues
+            is_van_type = "van" in pref or "bus" in pref or "sprinter" in pref or "v-class" in pref
+            if not is_van_type:
                  logging.info(f"⚠️ High Capacity ({pax} pax). Forcing Upgrade to Elite Van.")
                  pref = "van"
 
         # 2. Force Upgrade for 5-6 Passengers (Must be SUV or Van)
         elif pax > 4:
-            if any(x in pref for x in ['classic', 'executive', 'sedan', 'car', 'lexus', 'first class']):
+            is_small_type = "classic" in pref or "executive" in pref or "sedan" in pref or "car" in pref or "lexus" in pref or "first class" in pref
+            if is_small_type:
                 logging.info(f"⚠️ Capacity Mismatch (Pax {pax}). Upgrading {pref} to SUV.")
                 pref = "suv"
 
         # Determine Car & Final Price Dynamically
         
         # Mapping Logic that respects backend types & typos
-        if any(x in pref for x in ['classic', 'classis', 'sedan', 'car', 'lexus', 'standard']):
+        if "classic" in pref or "classis" in pref or "sedan" in pref or "car" in pref or "lexus" in pref or "standard" in pref:
              car_model = "Classic Sedan"
              v_type = "CLASSIC"
         elif 'executive' in pref or 'business' in pref or 'vip' in pref:
