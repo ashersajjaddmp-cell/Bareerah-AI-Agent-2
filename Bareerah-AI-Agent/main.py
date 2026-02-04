@@ -325,7 +325,7 @@ def run_ai(history, slots):
 
 @app.route('/', methods=['GET'])
 def index():
-    return "Ayesha Fluid AI V5 (Real Backend) Running"
+    return "Ayesha Fluid AI v5.2 (Real Backend) Running"
 
 @app.route('/voice', methods=['POST'])
 @app.route('/incoming', methods=['POST'])
