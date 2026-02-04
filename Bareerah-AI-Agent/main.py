@@ -102,11 +102,12 @@ def init_tables():
 
 # ✅ 3. CORE LOGIC (Requests Only - No Google Lib)
 def resolve_address(addr):
-    """Google Places Text Search via Requests"""
+    """Google Places Text Search via Requests with UAE Bias"""
     if not GOOGLE_MAPS_API_KEY: return addr
+    search_query = f"{addr}, United Arab Emirates" if "emirate" not in addr.lower() else addr
     try:
         url = "https://maps.googleapis.com/maps/api/place/findplacefromtext/json"
-        params = {"input": addr, "inputtype": "textquery", "fields": "formatted_address", "key": GOOGLE_MAPS_API_KEY}
+        params = {"input": search_query, "inputtype": "textquery", "fields": "formatted_address,geometry", "key": GOOGLE_MAPS_API_KEY}
         res = requests.get(url, params=params, timeout=5).json()
         if res.get("candidates"):
             return res["candidates"][0]["formatted_address"]
@@ -263,12 +264,16 @@ def run_ai(history, slots):
       "I have noted your request regarding the price. Our management team will calculate the final discount and update you during the confirmation call."
     - DO NOT try to calculate discounts yourself. Just log them in 'extra_details'.
     
+    CORRECTIONS & CHANGES:
+    - If the user changes their mind (e.g., "Change pickup to X" or "Actually, I'm going to Y"), UPDATE the slot with the new information and say "Understood, I've updated that for you."
+    - If the user wants to cancel or says "I don't want the ride", say "No problem. Have a nice day!" and set action: "finalize".
+    
     CRITICAL RULES:
     1. **NO EMOJIS**: NEVER include emojis in your "response". Only plain text.
     2. **STRICT SEQUENCE**: 1. Name -> 2. Pickup -> 3. Dropoff -> 4. Time -> 5. Pax/Luggage.
-    3. **NO LOOPING**: Once a slot is filled, never ask for it again.
+    3. **SMART EXTRACTION**: If the user provides a detail out of order, extract it and move to the next missing step.
     4. **PITCH LOGIC**: Once you have the 6 core slots, set action to "confirm_pitch".
-    4. **EMPTY INPUT**: If silent, say "I'm still here, could you please provide your [missing detail]?" in the selected language.
+    5. **EMPTY INPUT**: If silent, say "I'm still here, could you please provide your [missing detail]?" in the selected language.
     
     Current Info: {json.dumps(slots)}
     
@@ -301,13 +306,10 @@ def index():
 @app.route('/incoming', methods=['POST'])
 def incoming_call():
     resp = VoiceResponse()
-    # 1. First Salam and Introduction
-    resp.say("As-Salamu Alaykum. I am Ayesha.", voice='Polly.Joanna-Neural')
-    
-    # 2. Then Language Selection
+    # 1. Faster Greeting + Language in one block
     gather = resp.gather(num_digits=1, action='/select-language', timeout=5)
-    gather.say("For English, press 1. For Urdu, press 2. For Arabic, press 3.", voice='Polly.Joanna-Neural')
-    resp.redirect('/voice') # Repeat if no input
+    gather.say("As-Salamu Alaykum. I am Ayesha. For English, press 1. For Urdu, press 2. For Arabic, press 3.", voice='Polly.Joanna-Neural')
+    resp.redirect('/voice') 
     return str(resp)
 
 @app.route('/eleven-tts')
