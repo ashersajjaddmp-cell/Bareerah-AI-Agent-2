@@ -102,16 +102,31 @@ def init_tables():
 
 # ✅ 3. CORE LOGIC (Requests Only - No Google Lib)
 def resolve_address(addr):
-    """Google Places Text Search via Requests with UAE Bias"""
+    """Google Geocoding API with Strict UAE Component Filtering"""
     if not GOOGLE_MAPS_API_KEY: return addr
-    search_query = f"{addr}, United Arab Emirates" if "emirate" not in addr.lower() else addr
+    
+    # Don't resolve empty or weird short texts
+    if len(addr) < 3: return addr
+    
     try:
-        url = "https://maps.googleapis.com/maps/api/place/findplacefromtext/json"
-        params = {"input": search_query, "inputtype": "textquery", "fields": "formatted_address,geometry", "key": GOOGLE_MAPS_API_KEY}
+        url = "https://maps.googleapis.com/maps/api/geocode/json"
+        # Force results to be in UAE using components filter
+        params = {
+            "address": addr, 
+            "components": "country:AE", 
+            "key": GOOGLE_MAPS_API_KEY
+        }
         res = requests.get(url, params=params, timeout=5).json()
-        if res.get("candidates"):
-            return res["candidates"][0]["formatted_address"]
-    except: pass
+        
+        if res.get("status") == "OK" and res.get("results"):
+            return res["results"][0]["formatted_address"]
+            
+    except Exception as e: 
+        print(f"Geocoding Error: {e}")
+
+    # Fallback checks
+    if "dubai" not in addr.lower() and "uae" not in addr.lower() and "emirates" not in addr.lower():
+         return f"{addr}, Dubai, United Arab Emirates"
     return addr
 
 def calc_dist(p, d):
@@ -127,7 +142,6 @@ def calc_dist(p, d):
             print(f"⚠️ Google Maps REQUEST_DENIED. Check API Key for domain restrictions.")
         print(f"🗺️ Maps Status: {res.get('status')} | Elements: {res.get('rows', [{}])[0].get('elements', [{}])[0].get('status') if res.get('rows') else 'N/A'}")
         if res.get("rows") and res["rows"][0]["elements"][0]["status"] == "OK":
-            dist = res["rows"][0]["elements"][0]["distance"]["value"] / 1000.0
             dist = res["rows"][0]["elements"][0]["distance"]["value"] / 1000.0
             print(f"🗺️ Distance Calculated: {dist} km")
             if dist < 0.1: return 20.0 # Safety for 0 distance
