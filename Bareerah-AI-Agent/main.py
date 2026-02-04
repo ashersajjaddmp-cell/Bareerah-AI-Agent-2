@@ -100,12 +100,45 @@ def init_tables():
         finally:
             conn.close()
 
+# ✅ 2.5 LOCAL ACCURACY MAPPING (Top 20 Dubai Spots)
+LOCATION_MAPPING = {
+    "dubai mall": "Dubai Mall, Downtown Dubai, UAE",
+    "burj khalifa": "Burj Khalifa, Downtown Dubai, UAE",
+    "dxb": "Dubai International Airport (DXB), Dubai, UAE",
+    "dubai airport": "Dubai International Airport (DXB), Dubai, UAE",
+    "mall of the emirates": "Mall of the Emirates, Al Barsha, Dubai, UAE",
+    "moe": "Mall of the Emirates, Al Barsha, Dubai, UAE",
+    "palm jumeirah": "Palm Jumeirah, Dubai, UAE",
+    "dubai marina": "Dubai Marina, Dubai, UAE",
+    "deira": "Deira, Dubai, United Arab Emirates",
+    "deira hotel": "Deira, Dubai, United Arab Emirates",
+    "stadium": "Dubai International Stadium, Dubai Sports City, UAE",
+    "dubai stadium": "Dubai International Stadium, Dubai Sports City, UAE",
+    "desert safari": "Al Awir Desert Safari Camp, Dubai, UAE",
+    "burj al arab": "Burj Al Arab, Umm Suqeim, Dubai, UAE",
+    "atlantis": "Atlantis The Palm, Palm Jumeirah, Dubai, UAE",
+    "global village": "Global Village, Sheikh Mohammed Bin Zayed Rd, Dubai, UAE",
+    "dubai frame": "Zabeel Park, Dubai, UAE",
+    "museum of the future": "Sheikh Zayed Road, Dubai, UAE",
+    "jbr": "Jumeirah Beach Residence, Dubai, UAE",
+    "bluewaters": "Bluewaters Island, Dubai, UAE",
+    "expo city": "Expo City Dubai, UAE",
+    "city walk": "City Walk, Al Wasl, Dubai, UAE"
+}
+
 # ✅ 3. CORE LOGIC (Requests Only - No Google Lib)
 def resolve_address(addr):
     """Google Geocoding API with Strict UAE & Dubai Bias"""
     if not GOOGLE_MAPS_API_KEY: return addr
     if len(addr) < 3: return addr
     
+    # 1. LOCAL MAPPING CHECK (Super-Fast & Accurate)
+    norm_addr = addr.lower().strip()
+    for key, full_val in LOCATION_MAPPING.items():
+        if key in norm_addr:
+            return full_val
+
+    # 2. GOOGLE GEOCODING (Fallback)
     # Pre-process: If user didn't say Abu Dhabi/Sharjah, assume Dubai for city spots
     search_query = addr
     if not any(x in addr.lower() for x in ["dubai", "abu dhabi", "sharjah", "ajman", "rak", "fujairah"]):
