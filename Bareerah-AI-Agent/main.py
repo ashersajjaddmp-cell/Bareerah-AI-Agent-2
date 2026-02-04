@@ -121,11 +121,17 @@ def resolve_address(addr):
         res = requests.get(url, params=params, timeout=5).json()
         
         if res.get("status") == "OK" and res.get("results"):
-            return res["results"][0]["formatted_address"]
+            addr_found = res["results"][0]["formatted_address"]
+            # REJECT VAGUE RESULTS (If it just returns the country, it's useless)
+            if addr_found.strip() in ["United Arab Emirates", "UAE"]:
+                 pass # Fallback to loop/append logic below
+            else:
+                 return addr_found
             
     except Exception as e: 
         print(f"Geocoding Error: {e}")
 
+    # Fallback: Hard-append Dubai to ensure we stay local
     return f"{addr}, Dubai, UAE"
 
 def calc_dist(p, d):
@@ -320,7 +326,10 @@ def run_ai(history, slots):
     2. **STRICT SEQUENCE**: 1. Name -> 2. Pickup -> 3. Dropoff -> 4. **Date & Time** -> 5. Pax/Luggage.
        - When asking for time, ALWAYS say: "Could you please provide the pickup date and time?"
     3. **SMART EXTRACTION**: If the user provides a detail out of order, extract it and move to the next missing step.
-    4. **PITCH LOGIC**: Once you have the 6 core slots, set action to "confirm_pitch".
+    4. **PITCH LOGIC**: Once you have the 6 core slots, set action to "confirm_pitch". 
+       - CRITICAL: Even if the user says "I want Classic" early, you MUST still respond with: 
+         "Great, the Classic for this [distance] kilometer journey is [price] Dirhams. Before I book it, any other requirements?"
+       - Use the 'action': 'confirm_pitch' to trigger the price-fetching logic.
     # PRE-CONFIRMATION HANDLER:
     5. **PRE-CONFIRMATION**: After user selects car, ask: "Any other requirements?". set action: "ask_reqs".
     6. **FINALIZE RULES**: 
