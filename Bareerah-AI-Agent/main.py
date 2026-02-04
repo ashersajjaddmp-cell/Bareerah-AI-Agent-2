@@ -128,7 +128,9 @@ def calc_dist(p, d):
         print(f"🗺️ Maps Status: {res.get('status')} | Elements: {res.get('rows', [{}])[0].get('elements', [{}])[0].get('status') if res.get('rows') else 'N/A'}")
         if res.get("rows") and res["rows"][0]["elements"][0]["status"] == "OK":
             dist = res["rows"][0]["elements"][0]["distance"]["value"] / 1000.0
+            dist = res["rows"][0]["elements"][0]["distance"]["value"] / 1000.0
             print(f"🗺️ Distance Calculated: {dist} km")
+            if dist < 0.1: return 20.0 # Safety for 0 distance
             return dist
     except Exception as e: 
         print(f"❌ Maps Error: {e}")
@@ -444,7 +446,17 @@ def handle_call():
                          price = int(50 + (base_dist * 3.5)) if v_type == "SEDAN" else int(80 + (base_dist * 5.0))
                 
                 pitch += f"A {v_model} for this {base_dist} kilometer journey is {price} Dirhams. "
+                
+                # TRANSLATE PITCH IF NEEDED
+                sel_lang = state['slots'].get('language', 'English')
+                if sel_lang == 'Urdu':
+                    pitch = f"{base_dist} kilometer ke safar ke liye {v_model} ka kiraya {price} Dirham hai. "
+                elif sel_lang == 'Arabic':
+                    pitch = f"Sii'r {v_model} li-masafat {base_dist} kilometer huwa {price} dirham. "
+
             pitch += "Which suitable option would you like to book?"
+            if sel_lang == 'Urdu': pitch += "Aap konsi gaadi book karna chahenge?"
+            if sel_lang == 'Arabic': pitch += "Ayyu sayyarah tawaddu hajzaha?"
         else:
             # Fallback Pitch (Using Backend Fare API even for hardcoded types)
             logging.info("🚕 No suitable cars found in API, using fallback logic.")
