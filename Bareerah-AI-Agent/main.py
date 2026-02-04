@@ -100,13 +100,6 @@ def init_tables():
         finally:
             conn.close()
 
-def safe_int(val, default=0):
-    """Safely convert to int, handling strings/floats"""
-    try:
-        return int(float(str(val).strip()))
-    except:
-        return default
-
 # ✅ 3. CORE LOGIC (Requests Only - No Google Lib)
 def resolve_address(addr):
     """Google Places Text Search via Requests with UAE Bias"""
@@ -227,7 +220,7 @@ def fetch_backend_vehicles(pax, luggage):
     url = f"{BACKEND_BASE_URL}/api/bookings/suggest-vehicles"
     print(f"🚗 Fetching cars from: {url} (pax={pax}, luggage={luggage})")
     try:
-        params = {"passengers_count": safe_int(pax, 1), "luggage_count": safe_int(luggage, 0)}
+        params = {"passengers_count": int(pax), "luggage_count": int(luggage)}
         resp = requests.get(url, params=params, headers=headers, timeout=6)
         if resp.status_code == 200:
             data = resp.json()
@@ -238,18 +231,9 @@ def fetch_backend_vehicles(pax, luggage):
                      print(f"❓ No cars in JSON structure: {data}")
                 return v_list
             if isinstance(data, list):
-                # 🛠️ CAPACITY FILTER RESTORED
-                if pax > 4:
-                     return [v for v in data if v.get('capacity', 4) >= pax] or [v for v in data if v.get('vehicle_type', '').upper() in ['SUV', 'VAN']]
                 return data
     except Exception as e:
         print(f"⚠️ Suggest API Exception: {e}")
-        # Fallback with Capacity Logic
-        if pax > 4:
-             return [{"vehicle_type": "SUV", "model": "GMC Yukon", "base_fare": 170}, 
-                     {"vehicle_type": "VAN", "model": "Luxury Van", "base_fare": 165}]
-        return [{"vehicle_type": "CLASSIC", "model": "Toyota Camry", "base_fare": 95}, 
-                {"vehicle_type": "EXECUTIVE", "model": "Lexus ES", "base_fare": 105}]
     
     # 2. Fallback to general available vehicles
     url = f"{BACKEND_BASE_URL}/api/vehicles/available"
@@ -293,8 +277,8 @@ def run_ai(history, slots):
     
     CRITICAL NLU EXTRACTION:
     - customer_name, pickup_location, dropoff_location, pickup_time.
-    - passengers_count: Number of people (INTEGER ONLY, e.g. 2, 4).
-    - luggage_count: Number of bags (INTEGER ONLY, e.g. 0, 3).
+    - passengers_count, luggage_count.
+    - passengers_count, luggage_count.
     - preferred_vehicle: "Classic", "Executive", "SUV", "Van", "First Class".
     - extra_details: Capture any BARGAINING requests, discounts, special notes, or questions here.
     
@@ -312,9 +296,12 @@ def run_ai(history, slots):
     2. **STRICT SEQUENCE**: 1. Name -> 2. Pickup -> 3. Dropoff -> 4. Time -> 5. Pax/Luggage.
     3. **SMART EXTRACTION**: If the user provides a detail out of order, extract it and move to the next missing step.
     4. **PITCH LOGIC**: Once you have the 6 core slots, set action to "confirm_pitch".
-    5. **PRE-CONFIRMATION**: After the user selects a vehicle (e.g. "I want the Classic"), DO NOT finalize yet. Instead, say "Noted. Before I book the Classic, do you have any other requirements?" and set action to "ask_reqs".
-    6. **FINALIZE**: If they say "No" or provide a requirement to the "ask_reqs" step, THEN set action to "finalize".
-    7. **EMPTY INPUT**: If silent, say "I'm still here, could you please provide your [missing detail]?" in the selected language.
+    # PRE-CONFIRMATION HANDLER:
+    5. **PRE-CONFIRMATION**: After user selects car, ask: "Any other requirements?". set action: "ask_reqs".
+    6. **FINALIZE RULES**: 
+       - If user says "No", "Nothing", or "Just book", set action: "finalize".
+       - If user gives a requirement (e.g. "Baby seat"), log it in 'extra_details' and set action: "finalize".
+    7. **EMPTY INPUT**: If silent, ask for missing detail.
     
     Current Info: {json.dumps(slots)}
     
@@ -443,6 +430,12 @@ def handle_call():
     action = decision.get('action', 'continue')
 
     # ✅ SAFETY OVERRIDE: Force Pitch if logic gets stuck
+    # ✅ SHARED VARS for all states
+    p = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
+    d = resolve_address(state['slots'].get('dropoff_location', 'Dubai'))
+    base_dist = calc_dist(p, d)
+    b_type = "airport_transfer" if "airport" in (p+d).lower() else "point_to_point"
+
     # ✅ SAFETY OVERRIDE: Force Pitch ONLY if all info is there AND vehicle is NOT selected
     required = ['customer_name', 'pickup_location', 'dropoff_location', 'pickup_time', 'luggage_count']
     # Check if preferred_vehicle is MISSING. If it's present, we don't need to pitch.
@@ -454,14 +447,13 @@ def handle_call():
     
     # Logic: Present Options or Finalize
     if action == "confirm_pitch":
-        p = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
-        d = resolve_address(state['slots'].get('dropoff_location', 'Dubai'))
-        base_dist = calc_dist(p, d)
+        # Vars already calculated above
         
         # Fetch Real Options (Matches Capacity)
         pax = state['slots'].get('passengers_count', 1)
         lug = state['slots'].get('luggage_count', 0)
         options = fetch_backend_vehicles(pax, lug)
+        sel_lang = state['slots'].get('language', 'English')
         
         # Construction of the Pitch
         logging.info(f"🚗 Options found: {type(options)} - {options}")
@@ -502,16 +494,6 @@ def handle_call():
                     pitch = f"Sii'r {v_model} li-masafat {base_dist} kilometer huwa {price} dirham. "
 
             pitch += "Which suitable option would you like to book?"
-        else:
-            # Fallback Pitch (Using Backend Fare API even for hardcoded types)
-            logging.info("🚕 No suitable cars found in API, using fallback logic.")
-            sedan_fare = calculate_backend_fare(base_dist, "SEDAN") or int(50 + (base_dist * 3.5))
-            suv_fare = calculate_backend_fare(base_dist, "SUV") or int(80 + (base_dist * 5.0))
-            if pax > 4:
-                 pitch = f"For 5+ passengers, I have a Luxury SUV for {suv_fare} Dirhams. Would you like to book it?"
-            else:
-                 pitch = f"I have a Classic Sedan for {sedan_fare} Dirhams or a Luxury SUV for {suv_fare} Dirhams. Which do you prefer?"
-
         if sel_lang == 'Urdu': pitch += "Aap konsi gaadi book karna chahenge?"
         elif sel_lang == 'Arabic': pitch += "Ayyu sayyarah tawaddu hajzaha?"
         else: pitch += "Which suitable option would you like to book?"
@@ -524,9 +506,7 @@ def handle_call():
          pass
 
     elif action == "finalize":
-        p = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
-        d = resolve_address(state['slots'].get('dropoff_location', 'Dubai'))
-        base_dist = calc_dist(p, d)
+        # p, d, base_dist, b_type are already calculated at top of function
         
         # Validate Capacity BEFORE Booking
         pax = state['slots'].get('passengers_count', 1)
