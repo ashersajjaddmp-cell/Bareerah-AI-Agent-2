@@ -1,4 +1,4 @@
-# Bareerah Fluid AI V5.1.1 (Redeploy) 🚀
+# Bareerah Fluid AI V5.2 (Capacity & Pricing Fix) 🚀
 import os
 import json
 import logging
