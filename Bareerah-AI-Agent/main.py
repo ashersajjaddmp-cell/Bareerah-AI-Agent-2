@@ -92,9 +92,9 @@ def init_tables():
                 );
             """)
             conn.commit()
-            print("✅ Tables Init Success")
+            print("Tables Init Success")
         except Exception as e:
-            print(f"❌ Table Init Error: {e}")
+            print(f"Table Init Error: {e}")
         finally:
             conn.close()
 
@@ -245,34 +245,33 @@ def run_ai(history, slots):
     system = f"""
     You are Ayesha, Star Skyline Limousine's AI agent. Professional and helpful.
     
+    LANGUAGE:
+    - User has selected: {slots.get('language', 'English')}.
+    - ALWAYS respond in this language. 
+    - If Urdu: Use polite and respectful Urdu.
+    - If Arabic: Use professional Modern Standard Arabic or Gulf dialect.
+    
     CRITICAL NLU EXTRACTION:
-    You must extract information into the following exact slot names:
-    - customer_name: The customer's full name.
-    - pickup_location: The starting point of the journey.
-    - dropoff_location: The destination of the journey.
-    - pickup_time: The pickup date and time. Today is 2026-02-04. STRICTLY Extract in 'YYYY-MM-DD HH:MM' format.
-    - passengers_count: Number of people (default 1 if mentioned).
-    - luggage_count: Number of bags (default 0).
+    - customer_name, pickup_location, dropoff_location, pickup_time.
+    - passengers_count, luggage_count.
+    - extra_details: Capture any BARGAINING requests, discounts, special notes, or questions here.
+    
+    BARGAINING & EXTRA REQUESTS:
+    - If a user asks for a discount, "bargains", or asks for something not in your script, say: 
+      "I have noted your request. Our management team will check and update you regarding this during the confirmation call."
+    - Log the specific request in 'extra_details'.
     
     CRITICAL RULES:
-    1. **STRICT SEQUENCE**: You must follow this order and NEVER ask for two different steps at once:
-       Step 1: Ask for Name.
-       Step 2: Ask for Pickup Location (once Name is known).
-       Step 3: Ask for Dropoff Location (once Pickup is known).
-       Step 4: Ask for Pickup Date and Time (once Dropoff is known).
-       Step 5: Ask for Passengers AND Luggage together in ONE question (once Time is known).
-    2. **LUGGAGE IS BAGS**: Extracted values must be integers. "Four bags" = 4. 
-    3. **NO LOOPING**: Once a slot is filled, NEVER ask for it again. If you just got the luggage count, you now have everything. You MUST set action to "confirm_pitch".
-    4. **PITCH LOGIC**: When action is "confirm_pitch", just say "Perfect, let me check the available cars and fares for you."
-    5. **EMPTY INPUT**: If the user says nothing, just say "I'm still here, could you tell me your [current missing step]?"
-       - The user will choose a car from your options. When they pick one, extract it as 'preferred_vehicle' and action: "finalize".
-    4. **DO NOT REPEAT**: If a slot is filled in 'Current Info', never ask for it again.
+    1. **STRICT SEQUENCE**: 1. Name -> 2. Pickup -> 3. Dropoff -> 4. Time -> 5. Pax/Luggage.
+    2. **NO LOOPING**: Once a slot is filled, never ask for it again.
+    3. **PITCH LOGIC**: Once you have the 6 core slots, set action to "confirm_pitch".
+    4. **EMPTY INPUT**: If silent, say "I'm still here, could you please provide your [missing detail]?" in the selected language.
     
     Current Info: {json.dumps(slots)}
     
     Output JSON Format:
     {{
-      "response": "Your spoken response",
+      "response": "Your spoken response in {slots.get('language', 'English')}",
       "new_slots": {{ "slot_name": "extracted_value" }},
       "action": "continue" | "confirm_pitch" | "finalize"
     }}
@@ -293,25 +292,45 @@ def run_ai(history, slots):
 
 @app.route('/', methods=['GET'])
 def index():
-    return "Ayesha Fluid AI V5 (Real Backend) Running 🚀"
+    return "Ayesha Fluid AI V5 (Real Backend) Running"
 
-# ✅ ROUTE MATCHING: /voice AND /incoming -> Entry Point
 @app.route('/voice', methods=['POST'])
 @app.route('/incoming', methods=['POST'])
 def incoming_call():
+    resp = VoiceResponse()
+    gather = resp.gather(num_digits=1, action='/select-language', timeout=5)
+    gather.say("For English, press 1. Urdu ke liye, do dabaaein. Lil-lughati-al-arabiyyah, id-ghat ala raqam thalatha.", voice='Polly.Joanna-Neural')
+    resp.redirect('/voice') # Repeat if no input
+    return str(resp)
+
+@app.route('/select-language', methods=['POST'])
+def select_language():
     call_sid = request.values.get('CallSid')
+    digit = request.values.get('Digits')
     
-    # Init State
-    state = {"history": [], "slots": {}}
+    lang_map = {"1": "English", "2": "Urdu", "3": "Arabic"}
+    selected_lang = lang_map.get(digit, "English")
+    
+    state = {"history": [], "slots": {"language": selected_lang}}
     conn = get_db()
     if conn:
         with conn.cursor() as cur:
-            cur.execute("INSERT INTO call_state (call_sid, data) VALUES (%s, %s) ON CONFLICT (call_sid) DO NOTHING", (call_sid, json.dumps(state)))
+            cur.execute("INSERT INTO call_state (call_sid, data) VALUES (%s, %s) ON CONFLICT (call_sid) DO UPDATE SET data = %s", 
+                        (call_sid, json.dumps(state), json.dumps(state)))
         conn.commit()
     
     resp = VoiceResponse()
-    gather = resp.gather(input='speech', action='/handle', timeout=5)
-    gather.say("As-Salamu Alaykum. Welcome to Star Skyline. I am Ayesha. May I have your name?", voice='Polly.Joanna-Neural')
+    # Map start greeting to language
+    greetings = {
+        "English": "As-Salamu Alaykum. Welcome to Star Skyline. I am Ayesha. May I have your name?",
+        "Urdu": "Assalam-o-Alaikum. Star Skyline mein khush amdeed. Main Ayesha hoon. Kya main aapka naam jaan sakti hoon?",
+        "Arabic": "Assalamu Alaikum. Marhaba bikum fi Star Skyline. Ana Ayesha. Ma huwa ismuka?"
+    }
+    voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zayd-Neural"}
+    tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
+    
+    gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map[selected_lang])
+    gather.say(greetings[selected_lang], voice=voice_map[selected_lang])
     return str(resp)
 
 # ✅ ROUTE MATCHING: /handle -> Main Logic
@@ -476,7 +495,8 @@ def handle_call():
             "luggage_count": lug,
             "fare_aed": fare,
             "vehicle_model": car_model,
-            "pickup_time": clean_time
+            "pickup_time": clean_time,
+            "notes": state['slots'].get('extra_details', '')
         })
 
         # Send Email (Premium Template)
@@ -664,9 +684,14 @@ def handle_call():
             cur.execute("UPDATE call_state SET data = %s WHERE call_sid = %s", (json.dumps(state), call_sid))
         conn.commit()
     
+    # Multi-language voice selection
+    lang = state['slots'].get('language', 'English')
+    voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zayd-Neural"}
+    tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
+    
     resp = VoiceResponse()
-    gather = resp.gather(input='speech', action='/handle', timeout=5)
-    gather.say(ai_msg, voice='Polly.Joanna-Neural')
+    gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map.get(lang, "en-US"))
+    gather.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
     resp.redirect('/handle')
     return str(resp)
 
