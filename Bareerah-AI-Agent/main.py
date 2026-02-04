@@ -570,9 +570,6 @@ def handle_call():
         
         # Override AI response
         ai_msg = pitch
-        
-        # Override AI response
-        ai_msg = pitch
 
     elif action == "ask_reqs":
          # Use AI response directly (It will ask "Any requirements?")
@@ -590,6 +587,9 @@ def handle_call():
             lug = int(state['slots'].get('luggage_count', 0))
         except: lug = 0
         
+        # Get user preference first
+        pref = state['slots'].get('preferred_vehicle', 'Car').lower()
+
         # 1. Force Upgrade for 7+ Passengers (Must be a Van or MiniBus)
         if pax >= 7:
             if not any(x in pref for x in ['van', 'bus', 'sprinter', 'v-class']):
