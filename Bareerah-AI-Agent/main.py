@@ -258,15 +258,16 @@ def run_ai(history, slots):
     - passengers_count, luggage_count.
     - extra_details: Capture any BARGAINING requests, discounts, special notes, or questions here.
     
-    BARGAINING & EXTRA REQUESTS:
-    - If a user asks for a discount, "bargains", or asks for something not in your script, say: 
-      "I have noted your request. Our management team will check and update you regarding this during the confirmation call."
-    - Log the specific request in 'extra_details'.
+    BARGAINING & MONEY MATTERS:
+    - If a user asks for a discount, cheaper price, or "bargains", ALWAYS say: 
+      "I have noted your request regarding the price. Our management team will calculate the final discount and update you during the confirmation call."
+    - DO NOT try to calculate discounts yourself. Just log them in 'extra_details'.
     
     CRITICAL RULES:
-    1. **STRICT SEQUENCE**: 1. Name -> 2. Pickup -> 3. Dropoff -> 4. Time -> 5. Pax/Luggage.
-    2. **NO LOOPING**: Once a slot is filled, never ask for it again.
-    3. **PITCH LOGIC**: Once you have the 6 core slots, set action to "confirm_pitch".
+    1. **NO EMOJIS**: NEVER include emojis in your "response". Only plain text.
+    2. **STRICT SEQUENCE**: 1. Name -> 2. Pickup -> 3. Dropoff -> 4. Time -> 5. Pax/Luggage.
+    3. **NO LOOPING**: Once a slot is filled, never ask for it again.
+    4. **PITCH LOGIC**: Once you have the 6 core slots, set action to "confirm_pitch".
     4. **EMPTY INPUT**: If silent, say "I'm still here, could you please provide your [missing detail]?" in the selected language.
     
     Current Info: {json.dumps(slots)}
@@ -305,7 +306,7 @@ def incoming_call():
     
     # 2. Then Language Selection
     gather = resp.gather(num_digits=1, action='/select-language', timeout=5)
-    gather.say("For English, press 1. Urdu ke liye, do dabaaein. Lil-lughati-al-arabiyyah, id-ghat ala raqam thalatha.", voice='Polly.Joanna-Neural')
+    gather.say("For English, press 1. For Urdu, press 2. For Arabic, press 3.", voice='Polly.Joanna-Neural')
     resp.redirect('/voice') # Repeat if no input
     return str(resp)
 
