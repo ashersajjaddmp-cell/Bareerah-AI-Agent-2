@@ -415,7 +415,18 @@ def select_language():
     selected_lang = lang_map.get(digit, "English")
     print(f"🌍 Language Selected: {selected_lang} (Digit: {digit})")
     
-    state = {"history": [], "slots": {"language": selected_lang}}
+    # Map start greeting to language
+    greetings = {
+        "English": "As-Salamu Alaykum. Welcome to Star Skyline. I am Ayesha. May I have your name?",
+        "Urdu": "Assalam-o-Alaikum. Star Skyline mein khush amdeed. Main Ayesha hoon. Kya main aapka naam jaan sakti hoon?",
+        "Arabic": "Assalamu Alaikum. Marhaba bikum fi Star Skyline. Ana Ayesha. Ma huwa ismuka?"
+    }
+    
+    # Init history with the Greeting so the AI knows the language
+    state = {
+        "history": [{"role": "assistant", "content": greetings[selected_lang]}], 
+        "slots": {"language": selected_lang}
+    }
     conn = get_db()
     if conn:
         with conn.cursor() as cur:
@@ -424,12 +435,6 @@ def select_language():
         conn.commit()
     
     resp = VoiceResponse()
-    # Map start greeting to language
-    greetings = {
-        "English": "As-Salamu Alaykum. Welcome to Star Skyline. I am Ayesha. May I have your name?",
-        "Urdu": "Assalam-o-Alaikum. Star Skyline mein khush amdeed. Main Ayesha hoon. Kya main aapka naam jaan sakti hoon?",
-        "Arabic": "Assalamu Alaikum. Marhaba bikum fi Star Skyline. Ana Ayesha. Ma huwa ismuka?"
-    }
     voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zayd-Neural"}
     tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
     
@@ -888,9 +893,17 @@ def handle_call():
         """
         send_email(f"🚀 NEW BOOKING: {state['slots'].get('customer_name', 'Guest')}", email_body)
         
-        ai_msg = f"Great. I have booked the {car_model} for {fare} Dirhams. You will receive a confirmation shortly. Goodbye!"
-        
         # Save Final History
+        lang = state['slots'].get('language', 'English')
+        
+        # Multi-language final message
+        if lang == "Urdu":
+            ai_msg = f"Shukriya. Maine aapki {car_model} book kar di hai, jis ki qeemat {fare} Dirham hai. Aapko jald hi confirmation message mil jayega. Allah Hafiz!"
+        elif lang == "Arabic":
+            ai_msg = f"Shukran. Laqad tammat hajz {car_model} bi-mablagh {fare} Dirham. Satatalaqqa ta'keedan qareeban. Ma'a al-salama!"
+        else:
+            ai_msg = f"Great. I have booked the {car_model} for {fare} Dirhams. You will receive a confirmation shortly. Goodbye!"
+            
         state['history'].append({"role": "assistant", "content": ai_msg})
         if conn:
             with conn.cursor() as cur:
@@ -899,7 +912,15 @@ def handle_call():
             conn.close()
 
         resp = VoiceResponse()
-        resp.say(ai_msg, voice='Polly.Joanna-Neural')
+        voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zayd-Neural"}
+        
+        if lang == "Urdu":
+             from urllib.parse import quote
+             audio_url = f"{request.url_root.replace('http:', 'https:')}eleven-tts?text={quote(ai_msg)}"
+             resp.play(audio_url)
+        else:
+             resp.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
+             
         resp.hangup()
         return str(resp)
     
