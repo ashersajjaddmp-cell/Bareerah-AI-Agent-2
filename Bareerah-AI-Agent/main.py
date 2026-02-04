@@ -277,7 +277,7 @@ def run_ai(history, slots):
     
     CRITICAL NLU EXTRACTION:
     - customer_name, pickup_location, dropoff_location.
-    - pickup_time: EXACT Date AND Time (e.g. "Tomorrow at 4pm", "5th Feb 10am"). TODAY is 2026-02-04.
+    - pickup_time: EXACT Date AND Time (e.g. "Tomorrow at 4pm", "5th Feb 10am"). TODAY is 2026-02-04. MUST include both.
     - passengers_count, luggage_count.
     - preferred_vehicle: "Classic", "Executive", "SUV", "Van", "First Class".
     - extra_details: Capture any BARGAINING requests, discounts, special notes, or questions here.
@@ -293,7 +293,8 @@ def run_ai(history, slots):
     
     CRITICAL RULES:
     1. **NO EMOJIS**: NEVER include emojis in your "response". Only plain text.
-    2. **STRICT SEQUENCE**: 1. Name -> 2. Pickup -> 3. Dropoff -> 4. Time -> 5. Pax/Luggage.
+    2. **STRICT SEQUENCE**: 1. Name -> 2. Pickup -> 3. Dropoff -> 4. **Date & Time** -> 5. Pax/Luggage.
+       - When asking for time, ALWAYS say: "Could you please provide the pickup date and time?"
     3. **SMART EXTRACTION**: If the user provides a detail out of order, extract it and move to the next missing step.
     4. **PITCH LOGIC**: Once you have the 6 core slots, set action to "confirm_pitch".
     # PRE-CONFIRMATION HANDLER:
