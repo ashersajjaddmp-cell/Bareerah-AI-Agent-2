@@ -102,7 +102,7 @@ def init_tables():
 
 # ✅ 3. CORE LOGIC (Requests Only - No Google Lib)
 def resolve_address(addr):
-    """Returns a Place ID for 100% accurate distance calculation"""
+    """Returns a Place ID + Human Name for accuracy and display"""
     if not GOOGLE_MAPS_API_KEY: return addr
     if len(addr) < 3: return addr
     
@@ -116,36 +116,38 @@ def resolve_address(addr):
         params = {
             "input": search_query,
             "inputtype": "textquery",
-            "fields": "place_id,formatted_address",
+            "fields": "place_id,formatted_address,name",
             "locationbias": "circle:50000@25.2048,55.2708",
             "key": GOOGLE_MAPS_API_KEY
         }
         res = requests.get(url, params=params, timeout=5).json()
         if res.get("status") == "OK" and res.get("candidates"):
-            # Return place_id format for Distance Matrix API
-            return f"place_id:{res['candidates'][0]['place_id']}"
+            cand = res['candidates'][0]
+            # Prioritize the specific Landmark Name (e.g. Dubai Mall)
+            p_id = cand['place_id']
+            disp = cand.get('name', cand.get('formatted_address', addr))
+            return f"place_id:{p_id}|||{disp}"
     except: pass
     return f"{addr}, Dubai, UAE"
 
 def resolve_address_text(addr):
-    """Returns human-readable text for Display/Email"""
-    if "place_id:" in addr:
-        try:
-             pid = addr.split("place_id:")[1]
-             url = f"https://maps.googleapis.com/maps/api/place/details/json"
-             res = requests.get(url, params={"place_id": pid, "fields": "formatted_address", "key": GOOGLE_MAPS_API_KEY}).json()
-             return res.get("result", {}).get("formatted_address", addr)
-        except: return addr
-    return addr
+    """Extracts the display name from the ID|||Name format"""
+    if "|||" in str(addr):
+        return addr.split("|||")[1]
+    return str(addr).replace("place_id:", "")
 
 def calc_dist(p, d):
     """Google Distance Matrix via Requests"""
     if not GOOGLE_MAPS_API_KEY: 
         print("⚠️ No Google Maps Key. Defaulting to 20km.")
         return 20.0
+    # Extract real Place IDs if name is attached
+    origin = p.split("|||")[0] if "|||" in str(p) else p
+    dest = d.split("|||")[0] if "|||" in str(d) else d
+    
     try:
         url = "https://maps.googleapis.com/maps/api/distancematrix/json"
-        params = {"origins": p, "destinations": d, "mode": "driving", "key": GOOGLE_MAPS_API_KEY}
+        params = {"origins": origin, "destinations": dest, "mode": "driving", "key": GOOGLE_MAPS_API_KEY}
         res = requests.get(url, params=params, timeout=5).json()
         if res.get("status") == "REQUEST_DENIED":
             print(f"⚠️ Google Maps REQUEST_DENIED. Check API Key for domain restrictions.")
@@ -490,7 +492,7 @@ def handle_call():
     d = resolve_address_text(d_id)
 
     try:
-        base_dist = calc_dist(p_id, d_id) # Calculate using Place IDs (Accurate)
+        base_dist = round(calc_dist(p_id, d_id), 1) # Calculate Accurate & Round for Speech
     except:
         base_dist = 20.0
     b_type = "airport_transfer" if "airport" in (p+d).lower() else "point_to_point"
@@ -522,14 +524,13 @@ def handle_call():
             sel_lang = state['slots'].get('language', 'English')
             if sel_lang == 'Urdu':
                 pitch = f"Theek hai, mujhe {p} se {d} tak ka rasta mil gaya hai. "
+                pitch += f"Mujhe is ke liye yeh gaariyan mili hain: "
             elif sel_lang == 'Arabic':
                 pitch = f"Hasanan, laqad hadadtu al-masar min {p} ila {d}. "
+                pitch += f"Laqad wagadtu hadihi al-khiyarat: "
             else:
                 pitch = f"I've located the route from {p} to {d}. "
-
-            pitch += "I have these options for you based on our availability: "
-            if sel_lang == 'Urdu': pitch = f"Mujhe {p} se {d} tak ke liye yeh gaariyan mili hain: "
-            elif sel_lang == 'Arabic': pitch = f"Laqad wagadtu hadihi al-khiyarat min {p} ila {d}: "
+                pitch += "I have these options for you based on our availability: "
 
             # 2. Build the list of cars
             for v in options[:2]:
@@ -687,8 +688,10 @@ def handle_call():
             "luggage_count": lug,
             "fare_aed": fare,
             "vehicle_model": car_model,
-            "vehicle": car_model, # Try to fix Backend Dashboard
-            "model": car_model,   # Try to fix Backend Dashboard
+            "vehicle_name": car_model, 
+            "vehicle": car_model, 
+            "category": v_type,
+            "car_type": v_type,
             "pickup_time": clean_time,
             "notes": state['slots'].get('extra_details', '')
         })
