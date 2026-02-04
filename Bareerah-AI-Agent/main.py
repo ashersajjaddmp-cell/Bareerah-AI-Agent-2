@@ -603,6 +603,8 @@ def handle_call():
             "luggage_count": lug,
             "fare_aed": fare,
             "vehicle_model": car_model,
+            "vehicle": car_model, # Try to fix Backend Dashboard
+            "model": car_model,   # Try to fix Backend Dashboard
             "pickup_time": clean_time,
             "notes": state['slots'].get('extra_details', '')
         })
@@ -610,7 +612,18 @@ def handle_call():
         # Send Email (Premium Template)
         bk_ref = f"STARS-{call_sid[-6:].upper() if call_sid else 'XXXX'}"
         now_str = datetime.now().strftime('%d %B, %I:%M %p')
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Pretty Format Pickup Time
+        display_time = clean_time
+        try:
+            # Attempt to parse ISO or common formats
+            if "T" in clean_time:
+                dt_obj = datetime.fromisoformat(clean_time)
+                display_time = dt_obj.strftime('%d %b %Y, %I:%M %p')
+            else:
+                 # Fallback/Cleanup for non-ISO
+                 display_time = clean_time
+        except: pass
         
         email_body = f"""
         <html>
@@ -688,7 +701,7 @@ def handle_call():
                             <div class="route-item">
                                 <div class="route-icon">⏰</div>
                                 <div class="route-label">Pickup Time</div>
-                                <div class="route-text">{state['slots'].get('pickup_time', 'Pending')}</div>
+                                <div class="route-text">{display_time}</div>
                             </div>
                             <div class="connector">→</div>
                             <div class="route-item">
