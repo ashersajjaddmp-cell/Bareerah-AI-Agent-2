@@ -275,7 +275,9 @@ def run_ai(history, slots):
     2. **STRICT SEQUENCE**: 1. Name -> 2. Pickup -> 3. Dropoff -> 4. Time -> 5. Pax/Luggage.
     3. **SMART EXTRACTION**: If the user provides a detail out of order, extract it and move to the next missing step.
     4. **PITCH LOGIC**: Once you have the 6 core slots, set action to "confirm_pitch".
-    5. **EMPTY INPUT**: If silent, say "I'm still here, could you please provide your [missing detail]?" in the selected language.
+    5. **PRE-CONFIRMATION**: After the user selects a vehicle (e.g. "I want the Classic"), DO NOT finalize yet. Instead, say "Noted. Before I book the Classic, do you have any other requirements?" and set action to "ask_reqs".
+    6. **FINALIZE**: If they say "No" or provide a requirement to the "ask_reqs" step, THEN set action to "finalize".
+    7. **EMPTY INPUT**: If silent, say "I'm still here, could you please provide your [missing detail]?" in the selected language.
     
     Current Info: {json.dumps(slots)}
     
@@ -283,7 +285,7 @@ def run_ai(history, slots):
     {{
       "response": "Your spoken response in {slots.get('language', 'English')}",
       "new_slots": {{ "slot_name": "extracted_value" }},
-      "action": "continue" | "confirm_pitch" | "finalize"
+      "action": "continue" | "confirm_pitch" | "ask_reqs" | "finalize"
     }}
     """
     try:
@@ -455,18 +457,16 @@ def handle_call():
                     pitch = f"Sii'r {v_model} li-masafat {base_dist} kilometer huwa {price} dirham. "
 
             pitch += "Which suitable option would you like to book?"
-            if sel_lang == 'Urdu': pitch += "Aap konsi gaadi book karna chahenge?"
-            if sel_lang == 'Arabic': pitch += "Ayyu sayyarah tawaddu hajzaha?"
-        else:
-            # Fallback Pitch (Using Backend Fare API even for hardcoded types)
-            logging.info("🚕 No suitable cars found in API, using fallback logic.")
-            sedan_fare = calculate_backend_fare(base_dist, "SEDAN") or int(50 + (base_dist * 3.5))
-            suv_fare = calculate_backend_fare(base_dist, "SUV") or int(80 + (base_dist * 5.0))
-            pitch = f"I have a Lexus ES for {sedan_fare} Dirhams or a GMC Yukon for {suv_fare} Dirhams. Which do you prefer?"
+        if sel_lang == 'Urdu': pitch += "Aap konsi gaadi book karna chahenge?"
+        elif sel_lang == 'Arabic': pitch += "Ayyu sayyarah tawaddu hajzaha?"
+        else: pitch += "Which suitable option would you like to book?"
         
         # Override AI response
         ai_msg = pitch
-        # History will be appended at the very end of the loop
+
+    elif action == "ask_reqs":
+         # Use AI response directly (It will ask "Any requirements?")
+         pass
 
     elif action == "finalize":
         p = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
@@ -626,18 +626,18 @@ def handle_call():
                             <div class="booking-value">{bk_ref}</div>
                         </div>
                     </div>
-                    
-                    <div class="route-section">
-                        <div class="route-header">📍 Route & Time</div>
-                        <div class="route-flow">
-                            <div class="route-item">
-                                <div class="route-icon">📤</div>
-                                <div class="route-label">Pickup Location</div>
-                                <div class="route-text">{p}</div>
                             </div>
-                            <div class="connector">→</div>
-                            <div class="route-item">
-                                <div class="route-icon">⏰</div>
+                        </div>
+                    </div>
+                    
+                    <div class="info-bar">
+                         <div class="info-item">
+                             <div class="info-label">📝 Full Conversation Transcript</div>
+                             <div class="info-value" style="white-space: pre-wrap; font-size: 12px; color: #555;">
+{chr(10).join([f"{m['role'].upper()}: {m['content']}" for m in state['history']])}
+                             </div>
+                         </div>
+                    </div>
                                 <div class="route-label">Pickup Time</div>
                                 <div class="route-text">{state['slots'].get('pickup_time', 'Pending')}</div>
                             </div>
