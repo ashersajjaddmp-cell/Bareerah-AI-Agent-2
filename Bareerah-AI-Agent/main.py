@@ -250,7 +250,7 @@ def run_ai(history, slots):
     - customer_name: The customer's full name.
     - pickup_location: The starting point of the journey.
     - dropoff_location: The destination of the journey.
-    - pickup_time: The specific date and time for the pickup.
+    - pickup_time: The pickup date and time. Today is 2026-02-04. STRICTLY Extract in 'YYYY-MM-DD HH:MM' format.
     - passengers_count: Number of people (default 1 if mentioned).
     - luggage_count: Number of bags (default 0).
     
@@ -420,9 +420,13 @@ def handle_call():
              car_model = "First Class"
              v_type = "FIRST_CLASS"
         else:
-             # Fallback: Just use the user's preference capitalized
-             car_model = pref.title()
-             v_type = pref.upper()
+             # Hard Fallback to avoid 'CAR' 0-fare error
+             car_model = "Lexus ES"
+             v_type = "SEDAN"
+             
+        # Clean Time Format for Backend (Remove "p.m." etc if AI slipped up)
+        raw_time = state['slots'].get('pickup_time', '')
+        clean_time = raw_time.replace('p.m.', '').replace('a.m.', '').strip()
              
         # Get Final Perfect Fare from Backend
         fare = calculate_backend_fare(base_dist, v_type, b_type) or (
@@ -472,7 +476,7 @@ def handle_call():
             "luggage_count": lug,
             "fare_aed": fare,
             "vehicle_model": car_model,
-            "pickup_time": state['slots'].get('pickup_time')
+            "pickup_time": clean_time
         })
 
         # Send Email (Premium Template)
