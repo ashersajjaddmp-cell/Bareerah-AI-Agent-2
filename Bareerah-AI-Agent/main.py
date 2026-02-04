@@ -141,6 +141,24 @@ def send_email(subject, body):
     if not RESEND_API_KEY: 
         print("❌ No RESEND_API_KEY found.")
         return
+
+    headers = {
+        "Authorization": f"Bearer {RESEND_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "from": "Star Skyline <onboarding@resend.dev>",
+        "to": ["aizaz.dmp@gmail.com"], # Hardcoded for testing, user can change
+        "subject": subject,
+        "html": body
+    }
+    
+    try:
+        r = requests.post("https://api.resend.com/emails", json=payload, headers=headers)
+        print(f"📧 Email Sent Status: {r.status_code}")
+    except Exception as e:
+        print(f"❌ Email Error: {e}")
     
     # Try sending with professional domain first, fallback to onboarding if it fails
     senders = ["Star Skyline <onboarding@resend.dev>", "Star Skyline <bookings@starskyline.ae>"]
@@ -259,6 +277,8 @@ def run_ai(history, slots):
     CRITICAL NLU EXTRACTION:
     - customer_name, pickup_location, dropoff_location, pickup_time.
     - passengers_count, luggage_count.
+    - passengers_count, luggage_count.
+    - preferred_vehicle: "Classic", "Executive", "SUV", "Van", "First Class".
     - extra_details: Capture any BARGAINING requests, discounts, special notes, or questions here.
     
     BARGAINING & MONEY MATTERS:
@@ -481,11 +501,11 @@ def handle_call():
         pref = state['slots'].get('preferred_vehicle', 'Car').lower()
         
         # Mapping Logic that respects backend types
-        if 'classic' in pref:
-             car_model = "Classic"
+        if 'classic' in pref or 'lexus' in pref or 'sedan' in pref:
+             car_model = "Lexus ES (Classic)"
              v_type = "CLASSIC"
         elif 'executive' in pref:
-             car_model = "Executive"
+             car_model = "GM / BMW (Executive)"
              v_type = "EXECUTIVE"
         elif 'suv' in pref or 'gmc' in pref:
              car_model = "SUV"
@@ -626,23 +646,64 @@ def handle_call():
                             <div class="booking-value">{bk_ref}</div>
                         </div>
                     </div>
+                    <div class="route-section">
+                        <div class="route-header">📍 Route & Time</div>
+                        <div class="route-flow">
+                            <div class="route-item">
+                                <div class="route-icon">📤</div>
+                                <div class="route-label">Pickup Location</div>
+                                <div class="route-text">{p}</div>
                             </div>
-                        </div>
-                    </div>
-                    
-                    <div class="info-bar">
-                         <div class="info-item">
-                             <div class="info-label">📝 Full Conversation Transcript</div>
-                             <div class="info-value" style="white-space: pre-wrap; font-size: 12px; color: #555;">
-{chr(10).join([f"{m['role'].upper()}: {m['content']}" for m in state['history']])}
-                             </div>
-                         </div>
-                    </div>
+                            <div class="connector">→</div>
+                            <div class="route-item">
+                                <div class="route-icon">⏰</div>
                                 <div class="route-label">Pickup Time</div>
                                 <div class="route-text">{state['slots'].get('pickup_time', 'Pending')}</div>
                             </div>
                             <div class="connector">→</div>
                             <div class="route-item">
+                                <div class="route-icon">📥</div>
+                                <div class="route-label">Dropoff Location</div>
+                                <div class="route-text">{d}</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="info-bar">
+                        <div class="info-item">
+                            <div class="info-label">🚗 Vehicle</div>
+                            <div class="info-value vehicle">{car_model} <span style="font-size:12px; color:#999;">({v_type})</span></div>
+                        </div>
+                        <div class="info-item">
+                             <div class="info-label">👥 Passengers</div>
+                             <div class="info-value">{pax}</div>
+                        </div>
+                        <div class="info-item">
+                             <div class="info-label">🧳 Luggage</div>
+                             <div class="info-value">{lug}</div>
+                        </div>
+                         <div class="info-item">
+                             <div class="info-label">📏 Distance</div>
+                             <div class="info-value">{base_dist} km</div>
+                        </div>
+                    </div>
+
+                    <div class="driver-section">
+                        <div class="driver-pic">👨‍✈️</div>
+                        <div class="driver-info">
+                             <div class="driver-header">Your Chauffeur Service</div>
+                             <div class="driver-name">Star Skyline Chauffeurs</div>
+                             <div class="driver-number">Call for Support: <a href="tel:+971505374823">+971 50 537 4823</a></div>
+                        </div>
+                    </div>
+                    
+                    <!-- TRANSCRIPT MOVED TO BOTTOM -->
+                    <div style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 15px;">
+                        <div class="booking-label" style="text-align:center; margin-bottom:10px;">Full Conversation Transcript</div>
+                        <div style="background:#f1f1f1; padding:15px; border-radius:5px; font-size:11px; color:#555; white-space: pre-wrap; max-height: 200px; overflow-y: auto;">
+{chr(10).join([f"{m['role'].upper()}: {m['content']}" for m in state['history']])}
+                        </div>
+                    </div>
                                 <div class="route-icon">📥</div>
                                 <div class="route-label">Dropoff Location</div>
                                 <div class="route-text">{d}</div>
