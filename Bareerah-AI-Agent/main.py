@@ -315,14 +315,10 @@ def run_ai(history, slots):
     LANGUAGE:
     - User has selected: {slots.get('language', 'English')}.
     - If English: Speak professional English.
-    - If English: Speak professional English.
-    - If English: Speak professional English.
     - If Urdu: SPEAK IN **EASY ROMAN URDU** (Minglish).
       - Rule: Use English words for hard terms ("Car", "Time", "Location").
       - **KEEP IT SHORT**: Max 1 setence if possible. Fast replies.
       - Example: "Theek hai, Dropoff kahan hai?" (Good, where is dropoff?).
-    - If Arabic: Speak in Modern Standard Arabic.
-    - If Arabic: Speak in Modern Standard Arabic.
     - If Arabic: Speak in Modern Standard Arabic.
     
     CRITICAL NLU EXTRACTION:
@@ -384,6 +380,10 @@ def run_ai(history, slots):
             temperature=0.0
         )
         return json.loads(resp.choices[0].message.content)
+    except Exception as e:
+        print(f"❌ AI CRASH: {e}")
+        # FAIL SAFE: Return a safe English/Roman response to prevent loop
+        return {"response": "Maaf kijiyega, awaz kat gayi. Kya aap dubara bol sakte hain?", "new_slots": {}, "action": "continue"}
     except:
         return {"response": "I'm sorry, I missed that. Could you repeat?", "new_slots": {}, "action": "continue"}
 
