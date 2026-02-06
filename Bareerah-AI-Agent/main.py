@@ -979,15 +979,9 @@ def handle_call():
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map.get(lang, "en-US"))
     
     if lang == "Urdu":
-         # Use ElevenLabs Turbo for 'Behtreen Awaz'
-         try:
-             from urllib.parse import quote
-             # Encode text for URL
-             audio_url = f"{request.url_root.replace('http:', 'https:')}eleven-tts?text={quote(ai_msg)}"
-             gather.play(audio_url)
-         except:
-             # Fallback to Google if URL gen fails to prevent crash
-             gather.say(ai_msg, voice="Google.ur-PK-Standard-A")
+         # STABILITY FIX: Reverting to Google TTS to stop the Loop.
+         # ElevenLabs URL generation is too likely to timeout/fail, causing the reset.
+         gather.say(ai_msg, voice="Google.ur-PK-Standard-A")
     else:
          gather.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
         
