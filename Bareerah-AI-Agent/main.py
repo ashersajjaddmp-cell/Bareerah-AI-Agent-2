@@ -946,19 +946,16 @@ def handle_call():
     
     # Multi-language voice selection
     lang = state['slots'].get('language', 'English')
-    voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zayd-Neural"}
+    # Arabic = Zeina (Female), Urdu = Google (Fast & Reliable)
+    voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
     tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
-    
     
     resp = VoiceResponse()
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map.get(lang, "en-US"))
     
-    if lang == "Urdu":
-        from urllib.parse import quote
-        audio_url = f"{request.url_root.replace('http:', 'https:')}eleven-tts?text={quote(ai_msg)}"
-        gather.play(audio_url)
-    else:
-        gather.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
+    # Use standard SAY for all languages to prevent lag. 
+    # Google Urdu is better than 5-second silence.
+    gather.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
         
     resp.redirect('/handle')
     return str(resp)
