@@ -947,17 +947,25 @@ def handle_call():
     # Multi-language voice selection
     lang = state['slots'].get('language', 'English')
     
-    # User Request: Use the SAME English voice (Joanna) for ALL languages
-    # This keeps the tone consistent even if the accent is American
-    target_voice = "Polly.Joanna-Neural" 
+    # OPTIMIZED VOICE MAPPING:
+    # English: Joanna (Standard American)
+    # Urdu: Aditi (Neural Hindi) - Speaks Urdu perfectly, natural & high quality.
+    # Arabic: Zeina (Neural Arabic) - Professional Female voice.
     
-    tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
+    voice_map = {
+        "English": "Polly.Joanna-Neural", 
+        "Urdu": "Polly.Aditi-Neural", 
+        "Arabic": "Polly.Zeina"
+    }
+    
+    tw_lang_map = {"English": "en-US", "Urdu": "hi-IN", "Arabic": "ar-XA"}
     
     resp = VoiceResponse()
+    # Use hi-IN for Aditi to ensure she reads the script correctly
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map.get(lang, "en-US"))
     
-    # Unified Voice for All
-    gather.say(ai_msg, voice=target_voice)
+    # Unified Voice Logic
+    gather.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
         
     resp.redirect('/handle')
     return str(resp)
