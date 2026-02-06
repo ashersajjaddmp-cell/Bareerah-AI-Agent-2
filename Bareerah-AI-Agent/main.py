@@ -315,8 +315,8 @@ def run_ai(history, slots):
     LANGUAGE:
     - User has selected: {slots.get('language', 'English')}.
     - ALWAYS respond in this language.
-    - If Urdu: Speak ONLY in polite Urdu. Do NOT switch to English.
-    - If Arabic: Speak ONLY in Modern Standard Arabic. Do NOT switch to English.
+    - If Urdu: Speak in **ROMAN URDU** (English Alphabets). Example: "Aap ka naam kya hai?". DO NOT use Arabic script (Nastaliq).
+    - If Arabic: Speak in Modern Standard Arabic.
     - STRICTLY FORBIDDEN to speak English if the user selected Urdu or Arabic, unless they explicitly ask to switch.
     
     CRITICAL NLU EXTRACTION:
@@ -947,21 +947,21 @@ def handle_call():
     # Multi-language voice selection
     lang = state['slots'].get('language', 'English')
     
-    # OPTIMIZED VOICE MAPPING:
-    # English: Joanna (Standard American)
-    # Urdu: Aditi (Neural Hindi) - Speaks Urdu perfectly, natural & high quality.
-    # Arabic: Zeina (Neural Arabic) - Professional Female voice.
+    # FINAL VOICE STRATEGY:
+    # Urdu -> Roman Urdu Text + Joanna Voice (English Engine).
+    # This prevents Script Crashes and fulfills "Same voice as English" request.
+    # Arabic -> Zeina (Female).
     
     voice_map = {
         "English": "Polly.Joanna-Neural", 
-        "Urdu": "Polly.Aditi-Neural", 
+        "Urdu": "Polly.Joanna-Neural", 
         "Arabic": "Polly.Zeina"
     }
     
-    tw_lang_map = {"English": "en-US", "Urdu": "hi-IN", "Arabic": "ar-XA"}
+    # For Roman Urdu, en-US transcription is often safer than hi-IN
+    tw_lang_map = {"English": "en-US", "Urdu": "en-US", "Arabic": "ar-XA"}
     
     resp = VoiceResponse()
-    # Use hi-IN for Aditi to ensure she reads the script correctly
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map.get(lang, "en-US"))
     
     # Unified Voice Logic
