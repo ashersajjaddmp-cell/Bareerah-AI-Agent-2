@@ -487,8 +487,9 @@ def handle_call():
         action = decision.get('action', 'continue')
 
         # ✅ SAFETY OVERRIDE: Force Pitch if logic gets stuck
-    # ✅ SHARED VARS for all states
-    p_id = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
+        
+        # ✅ SHARED VARS for all states
+        p_id = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
     d_id = resolve_address(state['slots'].get('dropoff_location', 'Dubai'))
     
     # Human readable versions for sync/email
