@@ -514,34 +514,35 @@ def handle_call():
             ai_msg = "Sorry, I'm having trouble connecting. Could you say that again?"
             action = "continue"
 
-    # ✅ SAFETY OVERRIDE: Force Pitch if logic gets stuck
-    # ✅ SHARED VARS for all states
-    p_id = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
-    d_id = resolve_address(state['slots'].get('dropoff_location', 'Dubai'))
-    
-    # Human readable versions for sync/email
-    p = resolve_address_text(p_id)
-    d = resolve_address_text(d_id)
-
-    try:
-        base_dist = round(calc_dist(p_id, d_id), 1) # Calculate Accurate & Round for Speech
-    except:
-        base_dist = 20.0
-    b_type = "airport_transfer" if "airport" in (p+d).lower() else "point_to_point"
-
-    # ✅ SAFETY OVERRIDE: Force Pitch ONLY if all info is there AND vehicle is NOT selected
+    # ✅ SAFETY OVERRIDE: Check if we need to force pitch logic
     required = ['customer_name', 'pickup_location', 'dropoff_location', 'pickup_time', 'luggage_count']
-    # Check if preferred_vehicle is MISSING. If it's present, we don't need to pitch.
-    if  all(state['slots'].get(k) for k in required) and \
-        not state['slots'].get('preferred_vehicle') and \
-        action == "continue":
-        print("🛠️ Safety Trigger: Forcing 'confirm_pitch' because all core slots are full.")
-        action = "confirm_pitch"
+    core_complete = all(state['slots'].get(k) for k in required)
+    
+    # Check safety trigger
+    if core_complete and \
+       not state['slots'].get('preferred_vehicle') and \
+       action == "continue":
+       print("🛠️ Safety Trigger: Forcing 'confirm_pitch'.")
+       action = "confirm_pitch"
     
     # Logic: Present Options or Finalize
-    if action == "confirm_pitch":
-        # Vars already calculated above
+    if action == "confirm_pitch" or action == "finalize":
+        # Only calc distance when actually needed (Saves 3s latency)
+        p_id = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
+        d_id = resolve_address(state['slots'].get('dropoff_location', 'Dubai'))
         
+        # Human readable versions for sync/email
+        p = resolve_address_text(p_id)
+        d = resolve_address_text(d_id)
+
+        try:
+            base_dist = round(calc_dist(p_id, d_id), 1)
+        except:
+            base_dist = 20.0
+        
+        b_type = "airport_transfer" if "airport" in (p+d).lower() else "point_to_point"
+            
+    if action == "confirm_pitch":
         # Fetch Real Options (Matches Capacity)
         pax = state['slots'].get('passengers_count', 1)
         lug = state['slots'].get('luggage_count', 0)
