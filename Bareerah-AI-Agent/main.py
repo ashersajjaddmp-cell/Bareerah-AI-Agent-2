@@ -489,11 +489,26 @@ def handle_call():
     
     state['history'].append({"role": "user", "content": speech})
     
-    # Process
-    decision = run_ai(state['history'], state['slots'])
-    state['slots'].update(decision.get('new_slots', {}))
-    ai_msg = decision.get('response', 'Understood.')
-    action = decision.get('action', 'continue')
+    # SIMPLIFIED LOADER: Robust against empty input or crashes
+    if not speech:
+        # Silence Logic: Don't call AI, just ask to repeat.
+        logging.warning("User Input Empty. Asking to repeat.")
+        lang = state['slots'].get('language', 'English')
+        if lang == 'Urdu': ai_msg = "Maaf kijiyega, mujhe awaz nahi aayi. Kya aap dubara bolenge?"
+        elif lang == 'Arabic': ai_msg = "Afwan, lam asmaa. Hal yumkinuka al-tiqrar?"
+        else: ai_msg = "I'm sorry, I didn't hear that. Could you please repeat?"
+        action = "continue"
+    else:
+        # Process Normal Input
+        try:
+            decision = run_ai(state['history'], state['slots'])
+            state['slots'].update(decision.get('new_slots', {}))
+            ai_msg = decision.get('response', 'Understood.')
+            action = decision.get('action', 'continue')
+        except Exception as e:
+            logging.error(f"CRITICAL AI FAIL: {e}")
+            ai_msg = "Sorry, I'm having trouble connecting. Could you say that again?"
+            action = "continue"
 
     # ✅ SAFETY OVERRIDE: Force Pitch if logic gets stuck
     # ✅ SHARED VARS for all states
