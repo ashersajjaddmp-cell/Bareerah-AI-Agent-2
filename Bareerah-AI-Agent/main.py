@@ -384,9 +384,12 @@ def index():
 def incoming_call():
     resp = VoiceResponse()
     # 1. Faster Greeting + Language in one block (Force DTMF)
+    # Use absolute URL for action to prevent path issues
     gather = resp.gather(num_digits=1, action='/select-language', input='dtmf', timeout=10)
     gather.say("As-Salamu Alaykum. I am Ayesha. For English, press 1. For Urdu, press 2. For Arabic, press 3.", voice='Polly.Joanna-Neural')
-    resp.redirect('/voice') 
+    
+    # Loop if no input
+    resp.redirect('/incoming') 
     return str(resp)
 
 @app.route('/eleven-tts')
@@ -420,6 +423,11 @@ def eleven_tts():
 def select_language():
     call_sid = request.values.get('CallSid')
     digit = request.values.get('Digits')
+    
+    # Safety Check
+    if not digit:
+        print("⚠️ No digit received. Defaulting to English.")
+        digit = "1"
     
     lang_map = {"1": "English", "2": "Urdu", "3": "Arabic"}
     selected_lang = lang_map.get(digit, "English")
