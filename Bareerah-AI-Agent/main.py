@@ -365,10 +365,11 @@ def run_ai(history, slots):
     }}
     """
     try:
-        # ✅ SPEED: Using gpt-3.5-turbo for minimal latency.
-        # It follows instructions faster for simple booking tasks.
+        # ✅ STABILITY: Switched back to gpt-4o-mini because generic 3.5-turbo 
+        # doesn't reliably support JSON mode, causing 500 errors.
+        # 4o-mini is smart, fast, and handles Roman Urdu perfectly.
         resp = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=[{"role": "system", "content": system}] + history[-15:],
             response_format={"type": "json_object"},
             temperature=0.0
