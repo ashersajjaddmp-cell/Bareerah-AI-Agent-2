@@ -447,50 +447,41 @@ def select_language():
     resp = VoiceResponse()
     
     try:
-        # Zeina is Female Arabic. Google Urdu is fallback only.
-        voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
-        
-        target_voice = voice_map.get(selected_lang, "Polly.Joanna-Neural")
-        
-        print(f"🎤 STEP 1: Playing Greeting for {selected_lang} (Voice: {target_voice})")
-        
-        # 1. Just SAY the greeting (No Gather yet) to prevent "No Input" loop during speech
-        resp.say(greetings[selected_lang], voice=target_voice)
-        
-        # 2. Redirect to a dedicated "Listen" route
-        print(f"➡️ STEP 2: Redirecting to /start-listening")
-        resp.redirect('/start-listening')
+        # PURE ROUTER PATTERN: Don't speak here. Just redirect immediately to the logic handler.
+        # This prevents TwiML execution errors. Pass language in URL to be safe.
+        print(f"➡️ STEP 1: Redirecting to /start-listening?lang={selected_lang}")
+        resp.redirect(f'/start-listening?lang={selected_lang}')
         
     except Exception as e:
         print(f"❌ CRITICAL ERROR in select_language: {e}")
-        resp.say("Welcome. Please state your name.", voice='Polly.Joanna-Neural')
-        resp.redirect('/start-listening')
+        resp.redirect('/start-listening?lang=English')
 
     return str(resp)
 
 @app.route('/start-listening', methods=['POST'])
 def start_listening():
-    """Step 3: Just Listen (clean state)"""
-    call_sid = request.values.get('CallSid')
+    """Step 2: Greeting AND Listen (Consolidated)"""
+    # Prefer URL param (faster/safer), fallback to DB
+    lang = request.args.get('lang', 'English')
+    print(f"👂 STEP 2: Start Listening for {lang}")
     
-    # Reload Language from DB to be safe
-    conn = get_db()
-    lang = "English" # Default
-    if conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT data FROM call_state WHERE call_sid = %s", (call_sid,))
-            row = cur.fetchone()
-            if row: lang = row['data']['slots'].get('language', 'English')
-    
-    # Map Codes
+    # Map Voices & Codes
+    voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
     tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
-    target_code = tw_lang_map.get(lang, "en-US")
     
-    print(f"👂 STEP 3: Opening Mic for Language: {lang} (Code: {target_code})")
+    target_code = tw_lang_map.get(lang, "en-US")
+    target_voice = voice_map.get(lang, "Polly.Joanna-Neural")
+    
+    # Greetings Map (Restored here)
+    greetings = {
+        "English": "Welcome to Star Skyline. I am Ayesha. May I have your name?",
+        "Urdu": "Star Skyline mein khush amdeed. Main Ayesha hoon. Kya main aapka naam jaan sakti hoon?",
+        "Arabic": "Marhaba bikum fi Star Skyline. Ana Ayesha. Ma huwa ismuka?"
+    }
     
     resp = VoiceResponse()
-    # Now valid input is Speech OR Keys
-    gather = resp.gather(input='speech dtmf', action='/handle', timeout=6, language=target_code)
+    gather = resp.gather(input='speech dtmf', action='/handle', timeout=8, language=target_code)
+    gather.say(greetings.get(lang, greetings['English']), voice=target_voice)
     
     return str(resp)
 
