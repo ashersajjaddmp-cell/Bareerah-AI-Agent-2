@@ -314,9 +314,10 @@ def run_ai(history, slots):
     
     LANGUAGE:
     - User has selected: {slots.get('language', 'English')}.
-    - ALWAYS respond in this language. 
-    - If Urdu: Use polite and respectful Urdu.
-    - If Arabic: Use professional Modern Standard Arabic or Gulf dialect.
+    - ALWAYS respond in this language.
+    - If Urdu: Speak ONLY in polite Urdu. Do NOT switch to English.
+    - If Arabic: Speak ONLY in Modern Standard Arabic. Do NOT switch to English.
+    - STRICTLY FORBIDDEN to speak English if the user selected Urdu or Arabic, unless they explicitly ask to switch.
     
     CRITICAL NLU EXTRACTION:
     - customer_name, pickup_location, dropoff_location.
@@ -424,11 +425,11 @@ def select_language():
     selected_lang = lang_map.get(digit, "English")
     print(f"🌍 Language Selected: {selected_lang} (Digit: {digit})")
     
-    # Map start greeting to language
+    # Map start greeting to language (Removed "Salam" to avoid double greeting)
     greetings = {
-        "English": "As-Salamu Alaykum. Welcome to Star Skyline. I am Ayesha. May I have your name?",
-        "Urdu": "Assalam-o-Alaikum. Star Skyline mein khush amdeed. Main Ayesha hoon. Kya main aapka naam jaan sakti hoon?",
-        "Arabic": "Assalamu Alaikum. Marhaba bikum fi Star Skyline. Ana Ayesha. Ma huwa ismuka?"
+        "English": "Welcome to Star Skyline. I am Ayesha. May I have your name?",
+        "Urdu": "Star Skyline mein khush amdeed. Main Ayesha hoon. Kya main aapka naam jaan sakti hoon?",
+        "Arabic": "Marhaba bikum fi Star Skyline. Ana Ayesha. Ma huwa ismuka?"
     }
     
     # Init history with the Greeting so the AI knows the language
