@@ -445,17 +445,26 @@ def select_language():
         conn.commit()
     
     resp = VoiceResponse()
-    # Zeina is Female Arabic. Google Urdu is fallback only.
-    voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
-    tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
     
-    gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map[selected_lang])
-    
-    # Use Correct Voice for the Greeting (Google for Urdu, Zeina for Arabic)
-    # This ensures the user hears their selected language correctly immediately.
-    target_voice = voice_map.get(selected_lang, "Polly.Joanna-Neural")
-    gather.say(greetings[selected_lang], voice=target_voice)
-    
+    try:
+        # Zeina is Female Arabic. Google Urdu is fallback only.
+        voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
+        tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
+        
+        target_lang_code = tw_lang_map.get(selected_lang, "en-US")
+        target_voice = voice_map.get(selected_lang, "Polly.Joanna-Neural")
+        
+        print(f"🎤 Setup: Lang={selected_lang}, Code={target_lang_code}, Voice={target_voice}")
+        
+        gather = resp.gather(input='speech', action='/handle', timeout=5, language=target_lang_code)
+        gather.say(greetings[selected_lang], voice=target_voice)
+        
+    except Exception as e:
+        print(f"❌ Error in select_language TwiML generation: {e}")
+        # Emergency Fallback prevents loop
+        gather = resp.gather(input='speech', action='/handle', timeout=5, language='en-US')
+        gather.say("Welcome. Please state your name.", voice='Polly.Joanna-Neural')
+
     return str(resp)
 
 # ✅ ROUTE MATCHING: /handle -> Main Logic
