@@ -321,7 +321,8 @@ def run_ai(history, slots):
     
     CRITICAL NLU EXTRACTION:
     - customer_name, pickup_location, dropoff_location.
-    - pickup_time: EXACT Date AND Time (e.g. "Tomorrow at 4pm", "5th Feb 10am"). TODAY is 2026-02-04. MUST include both.
+    - pickup_time: EXACT Date AND Time (e.g. "Tomorrow at 4pm", "5th Feb 10am"). 
+    - **URDU DATES**: Handle terms like "Kal" (Tomorrow), "Parson" (Day after tomorrow), "Subah" (Morning), "Shaam" (Evening).
     - passengers_count, luggage_count.
     - preferred_vehicle: "Classic", "Executive", "SUV", "Van", "First Class".
     - extra_details: Capture any BARGAINING requests, discounts, special notes, or questions here.
@@ -958,8 +959,9 @@ def handle_call():
         "Arabic": "Polly.Zeina"
     }
     
-    # For Roman Urdu, en-US transcription is often safer than hi-IN
-    tw_lang_map = {"English": "en-US", "Urdu": "en-US", "Arabic": "ar-XA"}
+    # CRITICAL FIX: Use 'ur-PK' for INPUT so we understand the user's Urdu speech (Dates/Times).
+    # The AI will still output Roman Urdu via System Prompt for the Voice to read.
+    tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
     
     resp = VoiceResponse()
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map.get(lang, "en-US"))
