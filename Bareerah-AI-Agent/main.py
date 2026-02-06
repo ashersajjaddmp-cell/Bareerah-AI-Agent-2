@@ -464,6 +464,10 @@ def select_language():
     target_voice = voice_map.get(selected_lang, "Polly.Joanna-Neural")
     gather.say(greetings[selected_lang], voice=target_voice)
     
+    # CRITICAL FIX: If user says nothing, LOOP to handle so AI can re-prompt
+    # otherwise call drops or restarts.
+    resp.redirect('/handle')
+    
     return str(resp)
 
 # ✅ ROUTE MATCHING: /handle -> Main Logic
