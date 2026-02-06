@@ -456,7 +456,8 @@ def select_language():
         
         print(f"🎤 Setup: Lang={selected_lang}, Code={target_lang_code}, Voice={target_voice}")
         
-        gather = resp.gather(input='speech', action='/handle', timeout=5, language=target_lang_code)
+        # Use speech OR dtmf to keep connection alive and prevent "No Input" errors
+        gather = resp.gather(input='speech dtmf', action='/handle', timeout=8, language=target_lang_code)
         gather.say(greetings[selected_lang], voice=target_voice)
         
     except Exception as e:
