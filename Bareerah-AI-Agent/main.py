@@ -450,14 +450,10 @@ def select_language():
     
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map[selected_lang])
     
-    # High Quality Urdu via Play (ElevenLabs)
-    if selected_lang == "Urdu":
-        # Encode text for URL
-        from urllib.parse import quote
-        audio_url = f"{request.url_root.replace('http:', 'https:')}eleven-tts?text={quote(greetings['Urdu'])}"
-        gather.play(audio_url)
-    else:
-        gather.say(greetings[selected_lang], voice=voice_map[selected_lang])
+    # Unified Greeting Logic (Safer)
+    target_voice = voice_map.get(selected_lang, "Polly.Joanna-Neural")
+    gather.say(greetings[selected_lang], voice=target_voice)
+    
     return str(resp)
 
 # ✅ ROUTE MATCHING: /handle -> Main Logic
