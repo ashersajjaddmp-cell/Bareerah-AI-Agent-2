@@ -459,10 +459,15 @@ def select_language():
     
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map[selected_lang])
     
-    # UNIFIED STABLE LOGIC: Use Native Voice for Greeting
-    # We must use the correct voice for the language, otherwise it is silent/gibberish.
-    target_voice = voice_map.get(selected_lang, "Polly.Joanna-Neural")
-    gather.say(greetings[selected_lang], voice=target_voice)
+    # UNIFIED STABLE LOGIC: Use High-Quality TTS for initial handshake 
+    # To fix "Silence", we force audio file playback for Urdu/Arabic instead of `say`
+    if selected_lang != "English":
+         from urllib.parse import quote
+         # Using Turbo model via our proxy to ensure it actually plays
+         audio_url = f"{request.url_root.replace('http:', 'https:')}eleven-tts?text={quote(greetings[selected_lang])}"
+         gather.play(audio_url)
+    else:
+         gather.say(greetings[selected_lang], voice='Polly.Joanna-Neural')
     
     # CRITICAL FIX: If user says nothing, LOOP to handle so AI can re-prompt
     # otherwise call drops or restarts.
