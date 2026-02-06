@@ -384,13 +384,9 @@ def index():
 def incoming_call():
     resp = VoiceResponse()
     # 1. Faster Greeting + Language in one block (Force DTMF)
-    # 1. Faster Greeting + Language in one block (Force DTMF)
     gather = resp.gather(num_digits=1, action='/select-language', input='dtmf', timeout=10)
     gather.say("As-Salamu Alaykum. I am Ayesha. For English, press 1. For Urdu, press 2. For Arabic, press 3.", voice='Polly.Joanna-Neural')
-    
-    # If no input, hangup or loop ONCE (don't redirect consistently)
-    resp.say("I did not receive an input. Goodbye.", voice='Polly.Joanna-Neural')
-    resp.hangup()
+    resp.redirect('/voice') 
     return str(resp)
 
 @app.route('/eleven-tts')
@@ -455,10 +451,10 @@ def select_language():
     
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map[selected_lang])
     
-    # UNIFIED STABLE LOGIC: Use English Voice (Joanna) for ALL initial greetings.
-    # This prevents the Twilio loop caused by language switching or fetching external audio.
-    # The Agent will still speak the correct language in the next step, but the handshake is safe.
-    gather.say(greetings[selected_lang], voice='Polly.Joanna-Neural')
+    # Use Correct Voice for the Greeting (Google for Urdu, Zeina for Arabic)
+    # This ensures the user hears their selected language correctly immediately.
+    target_voice = voice_map.get(selected_lang, "Polly.Joanna-Neural")
+    gather.say(greetings[selected_lang], voice=target_voice)
     
     return str(resp)
 
@@ -480,16 +476,14 @@ def handle_call():
     state['history'].append({"role": "user", "content": speech})
     
     # Process
-    try:
-        decision = run_ai(state['history'], state['slots'])
-        state['slots'].update(decision.get('new_slots', {}))
-        ai_msg = decision.get('response', 'Understood.')
-        action = decision.get('action', 'continue')
+    decision = run_ai(state['history'], state['slots'])
+    state['slots'].update(decision.get('new_slots', {}))
+    ai_msg = decision.get('response', 'Understood.')
+    action = decision.get('action', 'continue')
 
-        # ✅ SAFETY OVERRIDE: Force Pitch if logic gets stuck
-        
-        # ✅ SHARED VARS for all states
-        p_id = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
+    # ✅ SAFETY OVERRIDE: Force Pitch if logic gets stuck
+    # ✅ SHARED VARS for all states
+    p_id = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
     d_id = resolve_address(state['slots'].get('dropoff_location', 'Dubai'))
     
     # Human readable versions for sync/email
@@ -963,14 +957,6 @@ def handle_call():
     # Google Urdu is better than 5-second silence.
     gather.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
         
-    except Exception as e:
-        import traceback
-        logging.error(f"❌ CRITICAL ERROR in /handle: {e}")
-        logging.error(traceback.format_exc())
-        resp = VoiceResponse()
-        resp.say("I am having a technical issue. Please call back later.", voice='Polly.Joanna-Neural')
-        return str(resp)
-
     resp.redirect('/handle')
     return str(resp)
 
