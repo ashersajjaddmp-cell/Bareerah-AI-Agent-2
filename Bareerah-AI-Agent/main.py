@@ -314,10 +314,11 @@ def run_ai(history, slots):
     
     LANGUAGE:
     - User has selected: {slots.get('language', 'English')}.
-    - ALWAYS respond in this language.
-    - If Urdu: You are a native Urdu speaker. Speak **SIMPLE ROMAN URDU** (English letters). 
-      - Example: "Gari kab chahiye?" instead of "Pickup time bataiye".
-      - Keep responses SHORT and FAST.
+    - If English: Speak professional English.
+    - If Urdu: SPEAK ONLY ROMAN URDU.
+      - Rule: Do NOT direct translate to English words. Use "Gari" not "Car", "Waqt" not "Time".
+      - PENALTY: If you output English text, the system will crash.
+      - Example: "Gari kab chahiye?" NOT "When do you need the car?".
     - If Arabic: Speak in Modern Standard Arabic.
     
     CRITICAL NLU EXTRACTION:
@@ -358,7 +359,7 @@ def run_ai(history, slots):
     
     Output JSON Format:
     {{
-      "response": "Your spoken response in {slots.get('language', 'English')}",
+      "response": "Your spoken response in {slots.get('language', 'English')} (Roman Urdu if Urdu)",
       "new_slots": {{ "slot_name": "extracted_value" }},
       "action": "continue" | "confirm_pitch" | "ask_reqs" | "finalize"
     }}
