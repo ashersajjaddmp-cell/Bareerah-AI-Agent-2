@@ -459,16 +459,20 @@ def select_language():
         conn.commit()
     
     resp = VoiceResponse()
-    # Zeina is Female Arabic. Google Urdu is fallback only.
-    voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
-    tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
     
-    gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map[selected_lang])
-    
-    # UNIFIED STABLE LOGIC: Use English Voice (Joanna) for ALL initial greetings.
-    # This prevents the Twilio loop caused by language switching or fetching external audio.
-    # The Agent will still speak the correct language in the next step, but the handshake is safe.
-    gather.say(greetings[selected_lang], voice='Polly.Joanna-Neural')
+    # 3. SEPARATED LOGIC for Initial Handshake
+    # This prevents any confusion in language switching right at the start.
+    if selected_lang == 'Urdu':
+        gather = resp.gather(input='speech', action='/handle', timeout=5, language='ur-PK')
+        gather.say(greetings['Urdu'], voice='Google.ur-PK-Standard-A')
+        
+    elif selected_lang == 'Arabic':
+        gather = resp.gather(input='speech', action='/handle', timeout=5, language='ar-XA')
+        gather.say(greetings['Arabic'], voice='Polly.Zeina')
+        
+    else: # English
+        gather = resp.gather(input='speech', action='/handle', timeout=5, language='en-US')
+        gather.say(greetings['English'], voice='Polly.Joanna-Neural')
     
     return str(resp)
 
