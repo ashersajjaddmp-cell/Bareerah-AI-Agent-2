@@ -315,10 +315,12 @@ def run_ai(history, slots):
     LANGUAGE:
     - User has selected: {slots.get('language', 'English')}.
     - If English: Speak professional English.
-    - If Urdu: SPEAK ONLY ROMAN URDU.
-      - Rule: Do NOT direct translate to English words. Use "Gari" not "Car", "Waqt" not "Time".
-      - PENALTY: If you output English text, the system will crash.
-      - Example: "Gari kab chahiye?" NOT "When do you need the car?".
+    - If English: Speak professional English.
+    - If Urdu: SPEAK IN **EASY ROMAN URDU** (Minglish).
+      - Rule: Use English words for hard terms to make it easy.
+      - KEYWORDS: Use "Time" (not Waqt), "Location" (not Maqam), "Car" (not Gari), "Book" (not Hajz).
+      - Example: "Aap ko kis time Car chahiye?" NOT "Aap ko kis waqt gari darkaar hai?".
+    - If Arabic: Speak in Modern Standard Arabic.
     - If Arabic: Speak in Modern Standard Arabic.
     
     CRITICAL NLU EXTRACTION:
