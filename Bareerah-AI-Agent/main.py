@@ -451,16 +451,10 @@ def select_language():
     
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map[selected_lang])
     
-    target_voice = voice_map.get(selected_lang, "Polly.Joanna-Neural")
-    
-    # High Quality Urdu via Play (restored with Turbo model)
-    if selected_lang == "Urdu":
-         from urllib.parse import quote
-         # Using Turbo model now to prevent timeouts
-         audio_url = f"{request.url_root.replace('http:', 'https:')}eleven-tts?text={quote(greetings['Urdu'])}"
-         gather.play(audio_url)
-    else:
-         gather.say(greetings[selected_lang], voice=target_voice)
+    # UNIFIED STABLE LOGIC: Use English Voice (Joanna) for ALL initial greetings.
+    # This prevents the Twilio loop caused by language switching or fetching external audio.
+    # The Agent will still speak the correct language in the next step, but the handshake is safe.
+    gather.say(greetings[selected_lang], voice='Polly.Joanna-Neural')
     
     return str(resp)
 
@@ -936,14 +930,9 @@ def handle_call():
             conn.close()
 
         resp = VoiceResponse()
-        voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zayd-Neural"}
         
-        if lang == "Urdu":
-             from urllib.parse import quote
-             audio_url = f"{request.url_root.replace('http:', 'https:')}eleven-tts?text={quote(ai_msg)}"
-             resp.play(audio_url)
-        else:
-             resp.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
+        # Use English Voice for all goodbye messages too for stability
+        resp.say(ai_msg, voice='Polly.Joanna-Neural')
              
         resp.hangup()
         return str(resp)
