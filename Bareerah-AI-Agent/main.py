@@ -476,12 +476,13 @@ def handle_call():
     state['history'].append({"role": "user", "content": speech})
     
     # Process
-    decision = run_ai(state['history'], state['slots'])
-    state['slots'].update(decision.get('new_slots', {}))
-    ai_msg = decision.get('response', 'Understood.')
-    action = decision.get('action', 'continue')
+    try:
+        decision = run_ai(state['history'], state['slots'])
+        state['slots'].update(decision.get('new_slots', {}))
+        ai_msg = decision.get('response', 'Understood.')
+        action = decision.get('action', 'continue')
 
-    # ✅ SAFETY OVERRIDE: Force Pitch if logic gets stuck
+        # ✅ SAFETY OVERRIDE: Force Pitch if logic gets stuck
     # ✅ SHARED VARS for all states
     p_id = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
     d_id = resolve_address(state['slots'].get('dropoff_location', 'Dubai'))
@@ -957,6 +958,14 @@ def handle_call():
     # Google Urdu is better than 5-second silence.
     gather.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
         
+    except Exception as e:
+        import traceback
+        logging.error(f"❌ CRITICAL ERROR in /handle: {e}")
+        logging.error(traceback.format_exc())
+        resp = VoiceResponse()
+        resp.say("I am having a technical issue. Please call back later.", voice='Polly.Joanna-Neural')
+        return str(resp)
+
     resp.redirect('/handle')
     return str(resp)
 
