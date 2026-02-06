@@ -312,12 +312,12 @@ def run_ai(history, slots):
     system = f"""
     You are Ayesha, Star Skyline Limousine's AI agent. Professional and helpful.
     
-    LANGUAGE:
+    LANGUAGE RULES:
     - User has selected: {slots.get('language', 'English')}.
     - ALWAYS respond in this language.
-    - If Urdu: Speak ONLY in polite Urdu. Do NOT switch to English.
-    - If Arabic: Speak ONLY in Modern Standard Arabic. Do NOT switch to English.
-    - STRICTLY FORBIDDEN to speak English if the user selected Urdu or Arabic, unless they explicitly ask to switch.
+    - If Urdu: Respond in PROPER URDU SCRIPT (اردو رسم الخط). Example: "آپ کا نام کیا ہے؟". NEVER use Roman Urdu / English letters.
+    - If Arabic: Respond in PROPER ARABIC SCRIPT. Example: "ما هو اسمك؟".
+    - STRICTLY FORBIDDEN to speak in English if Urdu/Arabic is selected.
     
     CRITICAL NLU EXTRACTION:
     - customer_name, pickup_location, dropoff_location.
@@ -393,20 +393,35 @@ def incoming_call():
     return str(resp)
 
 @app.route('/eleven-tts')
+@app.route('/eleven-tts')
 def eleven_tts():
     text = request.args.get('text', '')
+    lang = request.args.get('lang', 'English') # Get language context
+    
     if not text or not ELEVENLABS_API_KEY:
         return "Missing data", 400
         
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
+    # Use Multilingual Voice (Charlotte) for best Urdu/Arabic support
+    # Or your specific ID: "EXAVIT9j6IWWUXfXnS7G" (Bella) -> "XB0fDUnXU5powFXDhCwa" (Charlotte)
+    voice_id = "XB0fDUnXU5powFXDhCwa"  # Charlotte (Multilingual)
+    
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
     headers = {
         "xi-api-key": ELEVENLABS_API_KEY,
         "Content-Type": "application/json"
     }
+    
+    # Select Model based on Language
+    # Turbo is fast but English-only. Multilingual is needed for Urdu/Arabic.
+    if lang in ['Urdu', 'Arabic']:
+        model_id = "eleven_multilingual_v2"
+    else:
+        model_id = "eleven_turbo_v2_5"
+
     data = {
         "text": text,
-        "model_id": "eleven_turbo_v2_5", # Turbo for Speed (Prevents Loops)
-        "voice_settings": {"stability": 0.4, "similarity_boost": 0.5}
+        "model_id": model_id,
+        "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
     }
     
     try:
@@ -434,10 +449,11 @@ def select_language():
     print(f"🌍 Language Selected: {selected_lang} (Digit: {digit})")
     
     # Map start greeting to language (Removed "Salam" to avoid double greeting)
+    # Map start greeting to language (Proper Script for TTS)
     greetings = {
         "English": "Welcome to Star Skyline. I am Ayesha. May I have your name?",
-        "Urdu": "Star Skyline mein khush amdeed. Main Ayesha hoon. Kya main aapka naam jaan sakti hoon?",
-        "Arabic": "Marhaba bikum fi Star Skyline. Ana Ayesha. Ma huwa ismuka?"
+        "Urdu": "سٹار اسکائی لائن میں خوش آمدید۔ میں عائشہ ہوں۔ کیا میں آپ کا نام جان سکتی ہوں؟",
+        "Arabic": "مرحبًا بكم في ستار سکائی لاین. أنا عائشة. ما هو اسمك؟"
     }
     
     # Init history with the Greeting so the AI knows the language
@@ -460,11 +476,10 @@ def select_language():
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map[selected_lang])
     
     # UNIFIED STABLE LOGIC: Use High-Quality TTS for initial handshake 
-    # To fix "Silence", we force audio file playback for Urdu/Arabic instead of `say`
     if selected_lang != "English":
          from urllib.parse import quote
-         # Using Turbo model via our proxy to ensure it actually plays
-         audio_url = f"{request.url_root.replace('http:', 'https:')}eleven-tts?text={quote(greetings[selected_lang])}"
+         # Pass LANG param to ensure correct model usage
+         audio_url = f"{request.url_root.replace('http:', 'https:')}eleven-tts?text={quote(greetings[selected_lang])}&lang={selected_lang}"
          gather.play(audio_url)
     else:
          gather.say(greetings[selected_lang], voice='Polly.Joanna-Neural')
