@@ -21,9 +21,9 @@ logging.basicConfig(level=logging.INFO)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
-RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+RESEND_API_KEY = "re_6xbg7fwo_AzfvPWRWkkuygU3FZVRU952Q"
 BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "https://star-skyline-production.up.railway.app")
-NOTIFICATION_EMAIL = "aizaz.dmp@gmail.com" 
+NOTIFICATION_EMAIL = "jawaddigitalminds@gmail.com" 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = "EXAVIT9j6IWWUXfXnS7G" # Bella (High Quality Multilingual)
 
@@ -173,21 +173,8 @@ def send_email(subject, body):
     }
     
     # Transcript is already appended to body by the caller
-    payload = {
-        "from": "Star Skyline <onboarding@resend.dev>",
-        "to": ["aizaz.dmp@gmail.com"], 
-        "subject": subject,
-        "html": body
-    }
-    
-    try:
-        r = requests.post("https://api.resend.com/emails", json=payload, headers=headers)
-        print(f"📧 Email Sent Status: {r.status_code}")
-    except Exception as e:
-        print(f"❌ Email Error: {e}")
-    
-    # Try sending with professional domain first, fallback to onboarding if it fails
-    senders = ["Star Skyline <onboarding@resend.dev>", "Star Skyline <bookings@starskyline.ae>"]
+    # Try sending with custom domain (info@sslbookings.com) first
+    senders = ["Star Skyline <info@sslbookings.com>", "Star Skyline <onboarding@resend.dev>"]
     
     for sender in senders:
         try:
@@ -312,12 +299,11 @@ def run_ai(history, slots):
     system = f"""
     You are Ayesha, Star Skyline Limousine's AI agent. Professional and helpful.
     
-    LANGUAGE RULES:
+    LANGUAGE:
     - User has selected: {slots.get('language', 'English')}.
-    - ALWAYS respond in this language.
-    - If Urdu: Respond in PROPER URDU SCRIPT (اردو رسم الخط). Example: "آپ کا نام کیا ہے؟". NEVER use Roman Urdu / English letters.
-    - If Arabic: Respond in PROPER ARABIC SCRIPT. Example: "ما هو اسمك؟".
-    - STRICTLY FORBIDDEN to speak in English if Urdu/Arabic is selected.
+    - ALWAYS respond in this language. 
+    - If Urdu: Use polite and respectful Urdu.
+    - If Arabic: Use professional Modern Standard Arabic or Gulf dialect.
     
     CRITICAL NLU EXTRACTION:
     - customer_name, pickup_location, dropoff_location.
@@ -383,45 +369,27 @@ def index():
 @app.route('/incoming', methods=['POST'])
 def incoming_call():
     resp = VoiceResponse()
-    # 1. Faster Greeting + Language in one block (Force DTMF)
-    # Use absolute URL for action to prevent path issues
-    gather = resp.gather(num_digits=1, action='/select-language', input='dtmf', timeout=10)
+    # 1. Faster Greeting + Language in one block
+    gather = resp.gather(num_digits=1, action='/select-language', timeout=5)
     gather.say("As-Salamu Alaykum. I am Ayesha. For English, press 1. For Urdu, press 2. For Arabic, press 3.", voice='Polly.Joanna-Neural')
-    
-    # Loop if no input
-    resp.redirect('/incoming') 
+    resp.redirect('/voice') 
     return str(resp)
 
 @app.route('/eleven-tts')
-@app.route('/eleven-tts')
 def eleven_tts():
     text = request.args.get('text', '')
-    lang = request.args.get('lang', 'English') # Get language context
-    
     if not text or not ELEVENLABS_API_KEY:
         return "Missing data", 400
         
-    # Use Multilingual Voice (Charlotte) for best Urdu/Arabic support
-    # Or your specific ID: "EXAVIT9j6IWWUXfXnS7G" (Bella) -> "XB0fDUnXU5powFXDhCwa" (Charlotte)
-    voice_id = "XB0fDUnXU5powFXDhCwa"  # Charlotte (Multilingual)
-    
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
     headers = {
         "xi-api-key": ELEVENLABS_API_KEY,
         "Content-Type": "application/json"
     }
-    
-    # Select Model based on Language
-    # Turbo is fast but English-only. Multilingual is needed for Urdu/Arabic.
-    if lang in ['Urdu', 'Arabic']:
-        model_id = "eleven_multilingual_v2"
-    else:
-        model_id = "eleven_turbo_v2_5"
-
     data = {
         "text": text,
-        "model_id": model_id,
-        "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
+        "model_id": "eleven_multilingual_v2",
+        "voice_settings": {"stability": 0.5, "similarity_boost": 0.5}
     }
     
     try:
@@ -439,21 +407,15 @@ def select_language():
     call_sid = request.values.get('CallSid')
     digit = request.values.get('Digits')
     
-    # Safety Check
-    if not digit:
-        print("⚠️ No digit received. Defaulting to English.")
-        digit = "1"
-    
     lang_map = {"1": "English", "2": "Urdu", "3": "Arabic"}
     selected_lang = lang_map.get(digit, "English")
     print(f"🌍 Language Selected: {selected_lang} (Digit: {digit})")
     
-    # Map start greeting to language (Removed "Salam" to avoid double greeting)
-    # Map start greeting to language (Proper Script for TTS)
+    # Map start greeting to language
     greetings = {
-        "English": "Welcome to Star Skyline. I am Ayesha. May I have your name?",
-        "Urdu": "سٹار اسکائی لائن میں خوش آمدید۔ میں عائشہ ہوں۔ کیا میں آپ کا نام جان سکتی ہوں؟",
-        "Arabic": "مرحبًا بكم في ستار سکائی لاین. أنا عائشة. ما هو اسمك؟"
+        "English": "As-Salamu Alaykum. Welcome to Star Skyline. I am Ayesha. May I have your name?",
+        "Urdu": "اسلام علیکم۔ سٹار سکائی لائن میں خوش آمدید۔ میں عائشہ ہوں۔ کیا میں آپ کا نام جان سکتی ہوں؟",
+        "Arabic": "السلام عليكم. مرحبًا بكم في ستار سكاي ليموزين. أنا عائشة. ما هو اسمك؟"
     }
     
     # Init history with the Greeting so the AI knows the language
@@ -469,25 +431,28 @@ def select_language():
         conn.commit()
     
     resp = VoiceResponse()
-    # Zeina is Female Arabic. Google Urdu is fallback only.
     voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
     tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
     
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map[selected_lang])
     
-    # UNIFIED STABLE LOGIC: Use High-Quality TTS for initial handshake 
-    if selected_lang != "English":
-         from urllib.parse import quote
-         # Pass LANG param to ensure correct model usage
-         audio_url = f"{request.url_root.replace('http:', 'https:')}eleven-tts?text={quote(greetings[selected_lang])}&lang={selected_lang}"
-         gather.play(audio_url)
+    # High Quality Urdu via Play (ElevenLabs)
+    if selected_lang == "Urdu":
+        try:
+            # Encode text for URL
+            from urllib.parse import quote
+            
+            # Robust URL Construction
+            base = request.url_root.replace('http:', 'https:')
+            if not base.endswith('/'): base += '/'
+            
+            audio_url = f"{base}eleven-tts?text={quote(greetings['Urdu'])}"
+            gather.play(audio_url)
+        except Exception as e:
+            logging.error(f"❌ Urdu Audio Gen Error: {e}")
+            gather.say(greetings[selected_lang], voice=voice_map[selected_lang])
     else:
-         gather.say(greetings[selected_lang], voice='Polly.Joanna-Neural')
-    
-    # CRITICAL FIX: If user says nothing, LOOP to handle so AI can re-prompt
-    # otherwise call drops or restarts.
-    resp.redirect('/handle')
-    
+        gather.say(greetings[selected_lang], voice=voice_map[selected_lang])
     return str(resp)
 
 # ✅ ROUTE MATCHING: /handle -> Main Logic
@@ -554,11 +519,11 @@ def handle_call():
             # 1. Start with Address Confirmation
             sel_lang = state['slots'].get('language', 'English')
             if sel_lang == 'Urdu':
-                pitch = f"Theek hai, mujhe {p} se {d} tak ka rasta mil gaya hai. "
-                pitch += f"Mujhe is ke liye yeh gaariyan mili hain: "
+                pitch = f"ٹھیک ہے، مجھے {p} سے {d} تک کا راستہ مل گیا ہے۔ "
+                pitch += f"مجھے اس کے لیے یہ گاڑیاں ملی ہیں: "
             elif sel_lang == 'Arabic':
-                pitch = f"Hasanan, laqad hadadtu al-masar min {p} ila {d}. "
-                pitch += f"Laqad wagadtu hadihi al-khiyarat: "
+                pitch = f"حسناً، لقد حددت المسار من {p} إلى {d}. "
+                pitch += f"لقد وجدت هذه الخيارات: "
             else:
                 pitch = f"I've located the route from {p} to {d}. "
                 pitch += "I have these options for you based on our availability: "
@@ -584,20 +549,20 @@ def handle_call():
                 
                 # APPEND to pitch (Don't overwrite!)
                 if sel_lang == 'Urdu':
-                    pitch += f"{base_dist} kilometer ke safar ke liye {v_model} ka kiraya {price} Dirham hai. "
+                    pitch += f"{base_dist} کلومیٹر کے سفر کے لیے {v_model} کا کرایہ {price} درہم ہے۔ "
                 elif sel_lang == 'Arabic':
-                    pitch += f"Sii'r {v_model} li-masafat {base_dist} kilometer huwa {price} dirham. "
+                    pitch += f"سعر {v_model} لمسافة {base_dist} كيلومتر هو {price} درهم. "
                 else:
                     pitch += f"A {v_model} for this {base_dist} kilometer journey is {price} Dirhams. "
                 
             # 3. Add closing question
-            if sel_lang == 'Urdu': pitch += "Aap konsi gaadi book karna chahenge?"
-            elif sel_lang == 'Arabic': pitch += "Ayyu sayyarah tawaddu hajzaha?"
+            if sel_lang == 'Urdu': pitch += "آپ کون سی گاڑی بک کرنا چاہیں گے؟"
+            elif sel_lang == 'Arabic': pitch += "أي سيارة تود حجزها؟"
             else: pitch += "Which option would you like to book?"
         else:
             # Fallback if no cars found
-            if sel_lang == 'Urdu': pitch = "Maaf kijiyega, is waqt koi gaadi dastiyab nahi hai."
-            elif sel_lang == 'Arabic': pitch = "Afwan, la tujad sayyarat mutahaha l-aan."
+            if sel_lang == 'Urdu': pitch = "معاف کیجیے گا، اس وقت کوئی گاڑی دستیاب نہیں ہے۔"
+            elif sel_lang == 'Arabic': pitch = "عفواً، لا توجد سيارات متاحة الآن."
             else: pitch = "I'm sorry, I couldn't find any available vehicles for your requirements at the moment."
         
         # Override AI response
@@ -948,9 +913,9 @@ def handle_call():
         
         # Multi-language final message
         if lang == "Urdu":
-            ai_msg = f"Shukriya. Maine aapki {car_model} book kar di hai, jis ki qeemat {fare} Dirham hai. Aapko jald hi confirmation message mil jayega. Allah Hafiz!"
+            ai_msg = f"شکریہ۔ میں نے آپ کی {car_model} بک کر دی ہے، جس کی قیمت {fare} درہم ہے۔ آپ کو جلد ہی تصدیقی پیغام مل جائے گا۔ اللہ حافظ!"
         elif lang == "Arabic":
-            ai_msg = f"Shukran. Laqad tammat hajz {car_model} bi-mablagh {fare} Dirham. Satatalaqqa ta'keedan qareeban. Ma'a al-salama!"
+            ai_msg = f"شكراً. لقد تم حجز {car_model} بمبلغ {fare} درهم. ستتلقى تأكيداً قريباً. مع السلامة!"
         else:
             ai_msg = f"Great. I have booked the {car_model} for {fare} Dirhams. You will receive a confirmation shortly. Goodbye!"
             
@@ -962,18 +927,19 @@ def handle_call():
             conn.close()
 
         resp = VoiceResponse()
+        voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
         
-        # Use Correct Voice for Goodbye
-        # Urdu MUST use ElevenLabs (Turbo) because Google Voice fails with Roman Script
         if lang == "Urdu":
-             from urllib.parse import quote
-             # Use Turbo for speed
-             audio_url = f"{request.url_root.replace('http:', 'https:')}eleven-tts?text={quote(ai_msg)}"
-             resp.play(audio_url)
+             try:
+                from urllib.parse import quote
+                base = request.url_root.replace('http:', 'https:')
+                if not base.endswith('/'): base += '/'
+                audio_url = f"{base}eleven-tts?text={quote(ai_msg)}"
+                resp.play(audio_url)
+             except:
+                resp.say(ai_msg, voice=voice_map.get(lang, "Google.ur-PK-Standard-A"))
         else:
-             voice_map = {"English": "Polly.Joanna-Neural", "Arabic": "Polly.Zeina"}
-             target_voice = voice_map.get(lang, "Polly.Joanna-Neural")
-             resp.say(ai_msg, voice=target_voice)
+             resp.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
              
         resp.hangup()
         return str(resp)
@@ -994,17 +960,18 @@ def handle_call():
     resp = VoiceResponse()
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map.get(lang, "en-US"))
     
-    # Use standard voices for all to prevent lag/loops
-    # Zeina is Female Arabic. 
-    # CRITICAL: Urdu uses ElevenLabs because Google fails on Roman text.
     if lang == "Urdu":
-         from urllib.parse import quote
-         audio_url = f"{request.url_root.replace('http:', 'https:')}eleven-tts?text={quote(ai_msg)}"
-         gather.play(audio_url)
+        try:
+            from urllib.parse import quote
+            base = request.url_root.replace('http:', 'https:')
+            if not base.endswith('/'): base += '/'
+            
+            audio_url = f"{base}eleven-tts?text={quote(ai_msg)}"
+            gather.play(audio_url)
+        except:
+             gather.say(ai_msg, voice=voice_map.get(lang, "Google.ur-PK-Standard-A"))
     else:
-         voice_map = {"English": "Polly.Joanna-Neural", "Arabic": "Polly.Zeina"}
-         target_voice = voice_map.get(lang, "Polly.Joanna-Neural")
-         gather.say(ai_msg, voice=target_voice)
+        gather.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
         
     resp.redirect('/handle')
     return str(resp)
