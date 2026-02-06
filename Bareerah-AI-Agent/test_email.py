@@ -1,7 +1,7 @@
 
 import requests
 
-RESEND_API_KEY = "re_6xbg7fwo_AzfvPWRWkkuygU3FZVRU952Q"
+RESEND_API_KEY = "re_P3Xh65KG_M1Vo61dQQbHbWAbpMC4ff5yZ"
 TO_EMAIL = "starskylinelimousine@gmail.com"
 
 def send_test_email():
@@ -12,13 +12,13 @@ def send_test_email():
         "Content-Type": "application/json"
     }
 
-    senders = ["Star Skyline <onboarding@resend.dev>", "Star Skyline <bookings@starskyline.ae>"]
+    senders = ["Star Skyline <info@sslbookings.com>", "Star Skyline <onboarding@resend.dev>"]
 
     for sender in senders:
         payload = {
             "from": sender,
             "to": [TO_EMAIL],
-            "subject": "✅ Bareerah AI - Email Configuration Test",
+            "subject": "✅ Ayesha AI - Email Configuration Test",
             "html": f"""
             <div style="font-family: sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
                 <h2 style="color: #667eea;">Confirming Email Delivery</h2>
@@ -27,7 +27,7 @@ def send_test_email():
                 <br>
                 <p><strong>Config Details:</strong></p>
                 <ul>
-                    <li><strong>API Key Used:</strong> ...952Q</li>
+                    <li><strong>API Key Used:</strong> ...5yZ</li>
                     <li><strong>Sent From:</strong> {sender}</li>
                     <li><strong>Sent To:</strong> {TO_EMAIL}</li>
                 </ul>

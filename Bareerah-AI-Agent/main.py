@@ -1,4 +1,4 @@
-# Bareerah Fluid AI V5.2 (Capacity & Pricing Fix) 🚀
+# Ayesha Fluid AI V5.2 (Capacity & Pricing Fix) 🚀
 import os
 import json
 import logging
@@ -762,7 +762,7 @@ def handle_call():
                 <div class="content">
                     <p>Hi <strong>Admin</strong>,</p>
                     
-                    <div class="status">✅ 📞 New Booking Received via Bareerah AI.</div>
+                    <div class="status">✅ 📞 New Booking Received via Ayesha AI.</div>
                     
                     <div class="booking-bar">
                         <div>

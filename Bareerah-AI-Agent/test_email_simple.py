@@ -19,7 +19,7 @@ def send_test_email():
         payload = {
             "from": sender,
             "to": [TO_EMAIL],
-            "subject": "Bareerah AI - Email Configuration Test",
+            "subject": "Ayesha AI - Email Configuration Test",
             "html": f"""
             <div style="font-family: sans-serif; padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
                 <h2 style="color: #667eea;">Confirming Email Delivery</h2>
