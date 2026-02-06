@@ -548,8 +548,26 @@ def handle_call():
         ai_msg = pitch
 
     elif action == "ask_reqs":
-         # Use AI response directly (It will ask "Any requirements?")
-         pass
+        # Calculate Price & State it BEFORE final confirmation
+        pax = state['slots'].get('passengers_count', 1)
+        p_val = state['slots'].get('preferred_vehicle')
+        pref = str(p_val).lower() if p_val else "car"
+        
+        # Quick Map (Same as Finalize)
+        if "classic" in pref or "sedan" in pref or "car" in pref: v_type = "CLASSIC"; v_model = "Classic Sedan"
+        elif 'executive' in pref or 'vip' in pref: v_type = "EXECUTIVE"; v_model = "Executive Sedan"
+        elif 'van' in pref or 'elite' in pref: v_type = "ELITE_VAN"; v_model = "Luxury Van"
+        elif 'suv' in pref: v_type = "LUXURY_SUV"; v_model = "Luxury SUV"
+        else: v_type = "CLASSIC"; v_model = "Classic Sedan"
+
+        price = calculate_backend_fare(base_dist, v_type, b_type)
+        if not price: price = int(50 + (base_dist * 3.5))
+
+        sel_lang = state['slots'].get('language', 'English')
+        if sel_lang == 'Arabic':
+            ai_msg = f"سعر {v_model} هو {price} درهم. هل لديك أي متطلبات أخرى؟"
+        else:
+            ai_msg = f"The price for the {v_model} is {price} Dirhams. Do you have any other requirements?"
 
     elif action == "finalize":
         # p, d, base_dist, b_type are already calculated at top of function
