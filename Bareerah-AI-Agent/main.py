@@ -315,9 +315,10 @@ def run_ai(history, slots):
     LANGUAGE:
     - User has selected: {slots.get('language', 'English')}.
     - ALWAYS respond in this language.
-    - If Urdu: Speak in **ROMAN URDU** (English Alphabets). Example: "Aap ka naam kya hai?". DO NOT use Arabic script (Nastaliq).
+    - If Urdu: You are a native Urdu speaker. Speak **SIMPLE ROMAN URDU** (English letters). 
+      - Example: "Gari kab chahiye?" instead of "Pickup time bataiye".
+      - Keep responses SHORT and FAST.
     - If Arabic: Speak in Modern Standard Arabic.
-    - STRICTLY FORBIDDEN to speak English if the user selected Urdu or Arabic, unless they explicitly ask to switch.
     
     CRITICAL NLU EXTRACTION:
     - customer_name, pickup_location, dropoff_location.
@@ -363,9 +364,10 @@ def run_ai(history, slots):
     }}
     """
     try:
-        # ✅ SPEED: Using gpt-4o-mini for 3x faster response
+        # ✅ SPEED: Using gpt-3.5-turbo for minimal latency.
+        # It follows instructions faster for simple booking tasks.
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-3.5-turbo",
             messages=[{"role": "system", "content": system}] + history[-15:],
             response_format={"type": "json_object"},
             temperature=0.0
