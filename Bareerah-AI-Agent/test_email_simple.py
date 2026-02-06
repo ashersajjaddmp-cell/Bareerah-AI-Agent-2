@@ -3,7 +3,7 @@ import requests
 import json
 
 RESEND_API_KEY = "re_P3Xh65KG_M1Vo61dQQbHbWAbpMC4ff5yZ"
-TO_EMAIL = "jawaddigitalminds@gmail.com"
+TO_EMAIL = "starskylinelimousine@gmail.com"
 
 def send_test_email():
     print(f"Sending Test Email to {TO_EMAIL}...")

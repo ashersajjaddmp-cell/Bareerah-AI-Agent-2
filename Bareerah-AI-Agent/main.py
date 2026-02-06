@@ -23,7 +23,7 @@ GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 RESEND_API_KEY = "re_P3Xh65KG_M1Vo61dQQbHbWAbpMC4ff5yZ"
 BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "https://star-skyline-production.up.railway.app")
-NOTIFICATION_EMAIL = "jawaddigitalminds@gmail.com" 
+NOTIFICATION_EMAIL = "starskylinelimousine@gmail.com" 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = "EXAVIT9j6IWWUXfXnS7G" # Bella (High Quality Multilingual)
 
