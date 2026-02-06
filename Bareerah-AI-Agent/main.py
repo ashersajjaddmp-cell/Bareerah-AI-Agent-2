@@ -449,23 +449,49 @@ def select_language():
     try:
         # Zeina is Female Arabic. Google Urdu is fallback only.
         voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
-        tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
         
-        target_lang_code = tw_lang_map.get(selected_lang, "en-US")
         target_voice = voice_map.get(selected_lang, "Polly.Joanna-Neural")
         
-        print(f"🎤 Setup: Lang={selected_lang}, Code={target_lang_code}, Voice={target_voice}")
+        print(f"🎤 STEP 1: Playing Greeting for {selected_lang} (Voice: {target_voice})")
         
-        # Use speech OR dtmf to keep connection alive and prevent "No Input" errors
-        gather = resp.gather(input='speech dtmf', action='/handle', timeout=8, language=target_lang_code)
-        gather.say(greetings[selected_lang], voice=target_voice)
+        # 1. Just SAY the greeting (No Gather yet) to prevent "No Input" loop during speech
+        resp.say(greetings[selected_lang], voice=target_voice)
+        
+        # 2. Redirect to a dedicated "Listen" route
+        print(f"➡️ STEP 2: Redirecting to /start-listening")
+        resp.redirect('/start-listening')
         
     except Exception as e:
-        print(f"❌ Error in select_language TwiML generation: {e}")
-        # Emergency Fallback prevents loop
-        gather = resp.gather(input='speech', action='/handle', timeout=5, language='en-US')
-        gather.say("Welcome. Please state your name.", voice='Polly.Joanna-Neural')
+        print(f"❌ CRITICAL ERROR in select_language: {e}")
+        resp.say("Welcome. Please state your name.", voice='Polly.Joanna-Neural')
+        resp.redirect('/start-listening')
 
+    return str(resp)
+
+@app.route('/start-listening', methods=['POST'])
+def start_listening():
+    """Step 3: Just Listen (clean state)"""
+    call_sid = request.values.get('CallSid')
+    
+    # Reload Language from DB to be safe
+    conn = get_db()
+    lang = "English" # Default
+    if conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT data FROM call_state WHERE call_sid = %s", (call_sid,))
+            row = cur.fetchone()
+            if row: lang = row['data']['slots'].get('language', 'English')
+    
+    # Map Codes
+    tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
+    target_code = tw_lang_map.get(lang, "en-US")
+    
+    print(f"👂 STEP 3: Opening Mic for Language: {lang} (Code: {target_code})")
+    
+    resp = VoiceResponse()
+    # Now valid input is Speech OR Keys
+    gather = resp.gather(input='speech dtmf', action='/handle', timeout=6, language=target_code)
+    
     return str(resp)
 
 # ✅ ROUTE MATCHING: /handle -> Main Logic
