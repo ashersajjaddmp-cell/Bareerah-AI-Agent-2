@@ -402,8 +402,8 @@ def eleven_tts():
     }
     data = {
         "text": text,
-        "model_id": "eleven_multilingual_v2",
-        "voice_settings": {"stability": 0.5, "similarity_boost": 0.5}
+        "model_id": "eleven_turbo_v2_5", # Turbo for Speed (Prevents Loops)
+        "voice_settings": {"stability": 0.4, "similarity_boost": 0.5}
     }
     
     try:
@@ -445,14 +445,22 @@ def select_language():
         conn.commit()
     
     resp = VoiceResponse()
-    voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zayd-Neural"}
+    # Zeina is Female Arabic. Google Urdu is fallback only.
+    voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
     tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
     
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map[selected_lang])
     
-    # Unified Greeting Logic (Safer)
     target_voice = voice_map.get(selected_lang, "Polly.Joanna-Neural")
-    gather.say(greetings[selected_lang], voice=target_voice)
+    
+    # High Quality Urdu via Play (restored with Turbo model)
+    if selected_lang == "Urdu":
+         from urllib.parse import quote
+         # Using Turbo model now to prevent timeouts
+         audio_url = f"{request.url_root.replace('http:', 'https:')}eleven-tts?text={quote(greetings['Urdu'])}"
+         gather.play(audio_url)
+    else:
+         gather.say(greetings[selected_lang], voice=target_voice)
     
     return str(resp)
 
