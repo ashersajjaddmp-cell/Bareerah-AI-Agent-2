@@ -946,16 +946,18 @@ def handle_call():
     
     # Multi-language voice selection
     lang = state['slots'].get('language', 'English')
-    # Arabic = Zeina (Female), Urdu = Google (Fast & Reliable)
-    voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
+    
+    # User Request: Use the SAME English voice (Joanna) for ALL languages
+    # This keeps the tone consistent even if the accent is American
+    target_voice = "Polly.Joanna-Neural" 
+    
     tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
     
     resp = VoiceResponse()
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map.get(lang, "en-US"))
     
-    # Use standard SAY for all languages to prevent lag. 
-    # Google Urdu is better than 5-second silence.
-    gather.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
+    # Unified Voice for All
+    gather.say(ai_msg, voice=target_voice)
         
     resp.redirect('/handle')
     return str(resp)
