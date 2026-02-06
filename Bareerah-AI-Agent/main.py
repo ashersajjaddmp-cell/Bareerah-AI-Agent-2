@@ -316,17 +316,24 @@ def run_ai(history, slots):
     - User has selected: {slots.get('language', 'English')}.
     - If English: Speak professional English.
     - If English: Speak professional English.
+    - If English: Speak professional English.
     - If Urdu: SPEAK IN **EASY ROMAN URDU** (Minglish).
-      - Rule: Use English words for hard terms to make it easy.
-      - KEYWORDS: Use "Time" (not Waqt), "Location" (not Maqam), "Car" (not Gari), "Book" (not Hajz).
-      - Example: "Aap ko kis time Car chahiye?" NOT "Aap ko kis waqt gari darkaar hai?".
+      - Rule: Use English words for hard terms ("Car", "Time", "Location").
+      - **KEEP IT SHORT**: Max 1 setence if possible. Fast replies.
+      - Example: "Theek hai, Dropoff kahan hai?" (Good, where is dropoff?).
+    - If Arabic: Speak in Modern Standard Arabic.
     - If Arabic: Speak in Modern Standard Arabic.
     - If Arabic: Speak in Modern Standard Arabic.
     
     CRITICAL NLU EXTRACTION:
     - customer_name, pickup_location, dropoff_location.
     - pickup_time: EXACT Date AND Time (e.g. "Tomorrow at 4pm", "5th Feb 10am"). 
-    - **URDU DATES**: Handle terms like "Kal" (Tomorrow), "Parson" (Day after tomorrow), "Subah" (Morning), "Shaam" (Evening).
+    - **URDU DATES/TIME**:
+      - Handle "Kal" (Tomorrow), "Subah" (Morning), "Shaam" (Evening).
+      - **MINGLISH ALERT**: User might say English words in Urdu.
+      - If input is "ایوننگ" -> treat as "Evening".
+      - If input is "پک اپ" -> treat as "Pickup".
+    - passengers_count, luggage_count.
     - passengers_count, luggage_count.
     - preferred_vehicle: "Classic", "Executive", "SUV", "Van", "First Class".
     - extra_details: Capture any BARGAINING requests, discounts, special notes, or questions here.
