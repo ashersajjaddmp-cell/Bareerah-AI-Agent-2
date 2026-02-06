@@ -949,10 +949,16 @@ def handle_call():
         resp = VoiceResponse()
         
         # Use Correct Voice for Goodbye
-        voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
-        target_voice = voice_map.get(lang, "Polly.Joanna-Neural")
-        
-        resp.say(ai_msg, voice=target_voice)
+        # Urdu MUST use ElevenLabs (Turbo) because Google Voice fails with Roman Script
+        if lang == "Urdu":
+             from urllib.parse import quote
+             # Use Turbo for speed
+             audio_url = f"{request.url_root.replace('http:', 'https:')}eleven-tts?text={quote(ai_msg)}"
+             resp.play(audio_url)
+        else:
+             voice_map = {"English": "Polly.Joanna-Neural", "Arabic": "Polly.Zeina"}
+             target_voice = voice_map.get(lang, "Polly.Joanna-Neural")
+             resp.say(ai_msg, voice=target_voice)
              
         resp.hangup()
         return str(resp)
@@ -974,11 +980,16 @@ def handle_call():
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map.get(lang, "en-US"))
     
     # Use standard voices for all to prevent lag/loops
-    # Zeina is Female Arabic. Google Urdu is Standard.
-    voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
-    
-    target_voice = voice_map.get(lang, "Polly.Joanna-Neural")
-    gather.say(ai_msg, voice=target_voice)
+    # Zeina is Female Arabic. 
+    # CRITICAL: Urdu uses ElevenLabs because Google fails on Roman text.
+    if lang == "Urdu":
+         from urllib.parse import quote
+         audio_url = f"{request.url_root.replace('http:', 'https:')}eleven-tts?text={quote(ai_msg)}"
+         gather.play(audio_url)
+    else:
+         voice_map = {"English": "Polly.Joanna-Neural", "Arabic": "Polly.Zeina"}
+         target_voice = voice_map.get(lang, "Polly.Joanna-Neural")
+         gather.say(ai_msg, voice=target_voice)
         
     resp.redirect('/handle')
     return str(resp)
