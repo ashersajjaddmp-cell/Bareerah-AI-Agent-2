@@ -976,14 +976,17 @@ def handle_call():
     tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
     
     resp = VoiceResponse()
-    gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map.get(lang, "en-US"))
     
+    # SIMPLIFIED GATHER LOGIC to prevent Loop/Crash
     if lang == "Urdu":
-         # STABILITY FIX: Reverting to Google TTS to stop the Loop.
-         # ElevenLabs URL generation is too likely to timeout/fail, causing the reset.
-         gather.say(ai_msg, voice="Google.ur-PK-Standard-A")
+         gather = resp.gather(input='speech', action='/handle', timeout=4, language='ur-PK')
+         gather.say(ai_msg, voice='Google.ur-PK-Standard-A')
+    elif lang == "Arabic":
+         gather = resp.gather(input='speech', action='/handle', timeout=4, language='ar-XA')
+         gather.say(ai_msg, voice='Polly.Zeina')
     else:
-         gather.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
+         gather = resp.gather(input='speech', action='/handle', timeout=4, language='en-US')
+         gather.say(ai_msg, voice='Polly.Joanna-Neural')
         
     resp.redirect('/handle')
     return str(resp)
