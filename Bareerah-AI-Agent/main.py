@@ -445,58 +445,16 @@ def select_language():
         conn.commit()
     
     resp = VoiceResponse()
-    
-    try:
-        # PURE ROUTER PATTERN: Don't speak here. Just redirect immediately to the logic handler.
-        # This prevents TwiML execution errors. Pass language in URL to be safe.
-        print(f"➡️ STEP 1: Redirecting to /start-listening?lang={selected_lang}")
-        resp.redirect(f'/start-listening?lang={selected_lang}')
-        
-    except Exception as e:
-        print(f"❌ CRITICAL ERROR in select_language: {e}")
-        resp.redirect('/start-listening?lang=English')
-
-    return str(resp)
-
-@app.route('/start-listening', methods=['POST'])
-def start_listening():
-    """Step 2: Greeting AND Listen (Consolidated)"""
-    call_sid = request.values.get('CallSid')
-    
-    # 1. Try to get Lang from URL or POST Body
-    lang = request.values.get('lang') or request.args.get('lang')
-    
-    # 2. If missing, check DB
-    if not lang:
-        conn = get_db()
-        if conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT data FROM call_state WHERE call_sid = %s", (call_sid,))
-                row = cur.fetchone()
-                if row: lang = row['data']['slots'].get('language')
-    
-    # 3. Default to English if still missing
-    if not lang: lang = "English"
-
-    print(f"👂 STEP 2: Start Listening for {lang} (Source Verified)")
-    
-    # Map Voices & Codes
+    # Zeina is Female Arabic. Google Urdu is fallback only.
     voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
     tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
     
-    target_code = tw_lang_map.get(lang, "en-US")
-    target_voice = voice_map.get(lang, "Polly.Joanna-Neural")
+    gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map[selected_lang])
     
-    # Greetings Map (Restored here)
-    greetings = {
-        "English": "Welcome to Star Skyline. I am Ayesha. May I have your name?",
-        "Urdu": "Star Skyline mein khush amdeed. Main Ayesha hoon. Kya main aapka naam jaan sakti hoon?",
-        "Arabic": "Marhaba bikum fi Star Skyline. Ana Ayesha. Ma huwa ismuka?"
-    }
-    
-    resp = VoiceResponse()
-    gather = resp.gather(input='speech dtmf', action='/handle', timeout=8, language=target_code)
-    gather.say(greetings.get(lang, greetings['English']), voice=target_voice)
+    # UNIFIED STABLE LOGIC: Use Native Voice for Greeting
+    # We must use the correct voice for the language, otherwise it is silent/gibberish.
+    target_voice = voice_map.get(selected_lang, "Polly.Joanna-Neural")
+    gather.say(greetings[selected_lang], voice=target_voice)
     
     return str(resp)
 
@@ -973,8 +931,11 @@ def handle_call():
 
         resp = VoiceResponse()
         
-        # Use English Voice for all goodbye messages too for stability
-        resp.say(ai_msg, voice='Polly.Joanna-Neural')
+        # Use Correct Voice for Goodbye
+        voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
+        target_voice = voice_map.get(lang, "Polly.Joanna-Neural")
+        
+        resp.say(ai_msg, voice=target_voice)
              
         resp.hangup()
         return str(resp)
@@ -988,16 +949,19 @@ def handle_call():
     
     # Multi-language voice selection
     lang = state['slots'].get('language', 'English')
-    # Arabic = Zeina (Female), Urdu = Google (Fast & Reliable)
-    voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
+    voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zayd-Neural"}
     tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
+    
     
     resp = VoiceResponse()
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map.get(lang, "en-US"))
     
-    # Use standard SAY for all languages to prevent lag. 
-    # Google Urdu is better than 5-second silence.
-    gather.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
+    # Use standard voices for all to prevent lag/loops
+    # Zeina is Female Arabic. Google Urdu is Standard.
+    voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
+    
+    target_voice = voice_map.get(lang, "Polly.Joanna-Neural")
+    gather.say(ai_msg, voice=target_voice)
         
     resp.redirect('/handle')
     return str(resp)
