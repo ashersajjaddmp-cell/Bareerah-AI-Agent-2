@@ -23,7 +23,7 @@ GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 RESEND_API_KEY = "re_6xbg7fwo_AzfvPWRWkkuygU3FZVRU952Q"
 BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "https://star-skyline-production.up.railway.app")
-NOTIFICATION_EMAIL = "jawaddigitalminds@gmail.com" 
+NOTIFICATION_EMAIL = "starskylinelimousine@gmail.com" 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = "EXAVIT9j6IWWUXfXnS7G" # Bella (High Quality Multilingual)
 
@@ -435,7 +435,10 @@ def select_language():
     tw_lang_map = {"English": "en-US", "Arabic": "ar-XA"}
     
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map.get(selected_lang, "en-US"))
-    gather.say(greetings[selected_lang], voice=voice_map.get(selected_lang, "Polly.Joanna-Neural"))
+    
+    # Strict Voice Enforcement
+    use_voice = voice_map.get(selected_lang, "Polly.Joanna-Neural")
+    gather.say(greetings[selected_lang], voice=use_voice)
     return str(resp)
 
 # ✅ ROUTE MATCHING: /handle -> Main Logic
@@ -882,7 +885,10 @@ def handle_call():
         </body>
         </html>
         """
-        send_email(f"🚀 NEW BOOKING: {state['slots'].get('customer_name', 'Guest')}", email_body)
+        try:
+            send_email(f"🚀 NEW BOOKING: {state['slots'].get('customer_name', 'Guest')}", email_body)
+        except Exception as e:
+            logging.error(f"❌ Critical Email Failure: {e}")
         
         # Save Final History
         lang = state['slots'].get('language', 'English')
@@ -923,7 +929,9 @@ def handle_call():
     
     resp = VoiceResponse()
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map.get(lang, "en-US"))
-    gather.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
+    
+    use_voice = voice_map.get(lang, "Polly.Joanna-Neural")
+    gather.say(ai_msg, voice=use_voice)
         
     resp.redirect('/handle')
     return str(resp)
