@@ -950,28 +950,37 @@ def handle_call():
         conn.commit()
     
     # Multi-language voice selection
+    # Multi-language voice selection
     lang = state['slots'].get('language', 'English')
     
-    # FINAL VOICE STRATEGY:
-    # Urdu -> Roman Urdu Text + Joanna Voice (English Engine).
-    # This prevents Script Crashes and fulfills "Same voice as English" request.
-    # Arabic -> Zeina (Female).
+    # VOICE MAPPING (High Quality Request)
+    # English -> Joanna (Standard)
+    # Arabic -> Zeina (Female)
+    # Urdu -> ELEVENLABS TURBO (Best "Behtareen" Quality)
     
     voice_map = {
         "English": "Polly.Joanna-Neural", 
-        "Urdu": "Polly.Joanna-Neural", 
         "Arabic": "Polly.Zeina"
     }
     
     # CRITICAL FIX: Use 'ur-PK' for INPUT so we understand the user's Urdu speech (Dates/Times).
-    # The AI will still output Roman Urdu via System Prompt for the Voice to read.
     tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
     
     resp = VoiceResponse()
     gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map.get(lang, "en-US"))
     
-    # Unified Voice Logic
-    gather.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
+    if lang == "Urdu":
+         # Use ElevenLabs Turbo for 'Behtreen Awaz'
+         try:
+             from urllib.parse import quote
+             # Encode text for URL
+             audio_url = f"{request.url_root.replace('http:', 'https:')}eleven-tts?text={quote(ai_msg)}"
+             gather.play(audio_url)
+         except:
+             # Fallback to Google if URL gen fails to prevent crash
+             gather.say(ai_msg, voice="Google.ur-PK-Standard-A")
+    else:
+         gather.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
         
     resp.redirect('/handle')
     return str(resp)
