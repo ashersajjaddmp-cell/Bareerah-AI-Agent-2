@@ -461,9 +461,24 @@ def select_language():
 @app.route('/start-listening', methods=['POST'])
 def start_listening():
     """Step 2: Greeting AND Listen (Consolidated)"""
-    # Prefer URL param (faster/safer), fallback to DB
-    lang = request.args.get('lang', 'English')
-    print(f"👂 STEP 2: Start Listening for {lang}")
+    call_sid = request.values.get('CallSid')
+    
+    # 1. Try to get Lang from URL or POST Body
+    lang = request.values.get('lang') or request.args.get('lang')
+    
+    # 2. If missing, check DB
+    if not lang:
+        conn = get_db()
+        if conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT data FROM call_state WHERE call_sid = %s", (call_sid,))
+                row = cur.fetchone()
+                if row: lang = row['data']['slots'].get('language')
+    
+    # 3. Default to English if still missing
+    if not lang: lang = "English"
+
+    print(f"👂 STEP 2: Start Listening for {lang} (Source Verified)")
     
     # Map Voices & Codes
     voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
