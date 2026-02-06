@@ -314,22 +314,14 @@ def run_ai(history, slots):
     
     LANGUAGE:
     - User has selected: {slots.get('language', 'English')}.
-    - If English: Speak professional English.
-    - If Urdu: SPEAK IN **EASY ROMAN URDU** (Minglish).
-      - Rule: Use English words for hard terms ("Car", "Time", "Location").
-      - **KEEP IT SHORT**: Max 1 setence if possible. Fast replies.
-      - Example: "Theek hai, Dropoff kahan hai?" (Good, where is dropoff?).
-    - If Arabic: Speak in Modern Standard Arabic.
+    - ALWAYS respond in this language.
+    - If Urdu: Speak ONLY in polite Urdu. Do NOT switch to English.
+    - If Arabic: Speak ONLY in Modern Standard Arabic. Do NOT switch to English.
+    - STRICTLY FORBIDDEN to speak English if the user selected Urdu or Arabic, unless they explicitly ask to switch.
     
     CRITICAL NLU EXTRACTION:
     - customer_name, pickup_location, dropoff_location.
-    - pickup_time: EXACT Date AND Time (e.g. "Tomorrow at 4pm", "5th Feb 10am"). 
-    - **URDU DATES/TIME**:
-      - Handle "Kal" (Tomorrow), "Subah" (Morning), "Shaam" (Evening).
-      - **MINGLISH ALERT**: User might say English words in Urdu.
-      - If input is "ایوننگ" -> treat as "Evening".
-      - If input is "پک اپ" -> treat as "Pickup".
-    - passengers_count, luggage_count.
+    - pickup_time: EXACT Date AND Time (e.g. "Tomorrow at 4pm", "5th Feb 10am"). TODAY is 2026-02-04. MUST include both.
     - passengers_count, luggage_count.
     - preferred_vehicle: "Classic", "Executive", "SUV", "Van", "First Class".
     - extra_details: Capture any BARGAINING requests, discounts, special notes, or questions here.
@@ -364,15 +356,13 @@ def run_ai(history, slots):
     
     Output JSON Format:
     {{
-      "response": "Your spoken response in {slots.get('language', 'English')} (Roman Urdu if Urdu)",
+      "response": "Your spoken response in {slots.get('language', 'English')}",
       "new_slots": {{ "slot_name": "extracted_value" }},
       "action": "continue" | "confirm_pitch" | "ask_reqs" | "finalize"
     }}
     """
     try:
-        # ✅ STABILITY: Switched back to gpt-4o-mini because generic 3.5-turbo 
-        # doesn't reliably support JSON mode, causing 500 errors.
-        # 4o-mini is smart, fast, and handles Roman Urdu perfectly.
+        # ✅ SPEED: Using gpt-4o-mini for 3x faster response
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "system", "content": system}] + history[-15:],
@@ -380,10 +370,6 @@ def run_ai(history, slots):
             temperature=0.0
         )
         return json.loads(resp.choices[0].message.content)
-    except Exception as e:
-        print(f"❌ AI CRASH: {e}")
-        # FAIL SAFE: Return a safe English/Roman response to prevent loop
-        return {"response": "Maaf kijiyega, awaz kat gayi. Kya aap dubara bol sakte hain?", "new_slots": {}, "action": "continue"}
     except:
         return {"response": "I'm sorry, I missed that. Could you repeat?", "new_slots": {}, "action": "continue"}
 
@@ -459,20 +445,16 @@ def select_language():
         conn.commit()
     
     resp = VoiceResponse()
+    # Zeina is Female Arabic. Google Urdu is fallback only.
+    voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
+    tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
     
-    # 3. SEPARATED LOGIC for Initial Handshake
-    # This prevents any confusion in language switching right at the start.
-    if selected_lang == 'Urdu':
-        gather = resp.gather(input='speech', action='/handle', timeout=5, language='ur-PK')
-        gather.say(greetings['Urdu'], voice='Google.ur-PK-Standard-A')
-        
-    elif selected_lang == 'Arabic':
-        gather = resp.gather(input='speech', action='/handle', timeout=5, language='ar-XA')
-        gather.say(greetings['Arabic'], voice='Polly.Zeina')
-        
-    else: # English
-        gather = resp.gather(input='speech', action='/handle', timeout=5, language='en-US')
-        gather.say(greetings['English'], voice='Polly.Joanna-Neural')
+    gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map[selected_lang])
+    
+    # UNIFIED STABLE LOGIC: Use English Voice (Joanna) for ALL initial greetings.
+    # This prevents the Twilio loop caused by language switching or fetching external audio.
+    # The Agent will still speak the correct language in the next step, but the handshake is safe.
+    gather.say(greetings[selected_lang], voice='Polly.Joanna-Neural')
     
     return str(resp)
 
@@ -493,56 +475,40 @@ def handle_call():
     
     state['history'].append({"role": "user", "content": speech})
     
-    # SIMPLIFIED LOADER: Robust against empty input or crashes
-    if not speech:
-        # Silence Logic: Don't call AI, just ask to repeat.
-        logging.warning("User Input Empty. Asking to repeat.")
-        lang = state['slots'].get('language', 'English')
-        if lang == 'Urdu': ai_msg = "Maaf kijiyega, mujhe awaz nahi aayi. Kya aap dubara bolenge?"
-        elif lang == 'Arabic': ai_msg = "Afwan, lam asmaa. Hal yumkinuka al-tiqrar?"
-        else: ai_msg = "I'm sorry, I didn't hear that. Could you please repeat?"
-        action = "continue"
-    else:
-        # Process Normal Input
-        try:
-            decision = run_ai(state['history'], state['slots'])
-            state['slots'].update(decision.get('new_slots', {}))
-            ai_msg = decision.get('response', 'Understood.')
-            action = decision.get('action', 'continue')
-        except Exception as e:
-            logging.error(f"CRITICAL AI FAIL: {e}")
-            ai_msg = "Sorry, I'm having trouble connecting. Could you say that again?"
-            action = "continue"
+    # Process
+    decision = run_ai(state['history'], state['slots'])
+    state['slots'].update(decision.get('new_slots', {}))
+    ai_msg = decision.get('response', 'Understood.')
+    action = decision.get('action', 'continue')
 
-    # ✅ SAFETY OVERRIDE: Check if we need to force pitch logic
-    required = ['customer_name', 'pickup_location', 'dropoff_location', 'pickup_time', 'luggage_count']
-    core_complete = all(state['slots'].get(k) for k in required)
+    # ✅ SAFETY OVERRIDE: Force Pitch if logic gets stuck
+    # ✅ SHARED VARS for all states
+    p_id = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
+    d_id = resolve_address(state['slots'].get('dropoff_location', 'Dubai'))
     
-    # Check safety trigger
-    if core_complete and \
-       not state['slots'].get('preferred_vehicle') and \
-       action == "continue":
-       print("🛠️ Safety Trigger: Forcing 'confirm_pitch'.")
-       action = "confirm_pitch"
+    # Human readable versions for sync/email
+    p = resolve_address_text(p_id)
+    d = resolve_address_text(d_id)
+
+    try:
+        base_dist = round(calc_dist(p_id, d_id), 1) # Calculate Accurate & Round for Speech
+    except:
+        base_dist = 20.0
+    b_type = "airport_transfer" if "airport" in (p+d).lower() else "point_to_point"
+
+    # ✅ SAFETY OVERRIDE: Force Pitch ONLY if all info is there AND vehicle is NOT selected
+    required = ['customer_name', 'pickup_location', 'dropoff_location', 'pickup_time', 'luggage_count']
+    # Check if preferred_vehicle is MISSING. If it's present, we don't need to pitch.
+    if  all(state['slots'].get(k) for k in required) and \
+        not state['slots'].get('preferred_vehicle') and \
+        action == "continue":
+        print("🛠️ Safety Trigger: Forcing 'confirm_pitch' because all core slots are full.")
+        action = "confirm_pitch"
     
     # Logic: Present Options or Finalize
-    if action == "confirm_pitch" or action == "finalize":
-        # Only calc distance when actually needed (Saves 3s latency)
-        p_id = resolve_address(state['slots'].get('pickup_location', 'Dubai'))
-        d_id = resolve_address(state['slots'].get('dropoff_location', 'Dubai'))
-        
-        # Human readable versions for sync/email
-        p = resolve_address_text(p_id)
-        d = resolve_address_text(d_id)
-
-        try:
-            base_dist = round(calc_dist(p_id, d_id), 1)
-        except:
-            base_dist = 20.0
-        
-        b_type = "airport_transfer" if "airport" in (p+d).lower() else "point_to_point"
-            
     if action == "confirm_pitch":
+        # Vars already calculated above
+        
         # Fetch Real Options (Matches Capacity)
         pax = state['slots'].get('passengers_count', 1)
         lug = state['slots'].get('luggage_count', 0)
@@ -979,34 +945,17 @@ def handle_call():
         conn.commit()
     
     # Multi-language voice selection
-    # Multi-language voice selection
     lang = state['slots'].get('language', 'English')
-    
-    # VOICE MAPPING (High Quality Request)
-    # English -> Joanna (Standard)
-    # Arabic -> Zeina (Female)
-    # Urdu -> ELEVENLABS TURBO (Best "Behtareen" Quality)
-    
-    voice_map = {
-        "English": "Polly.Joanna-Neural", 
-        "Arabic": "Polly.Zeina"
-    }
-    
-    # CRITICAL FIX: Use 'ur-PK' for INPUT so we understand the user's Urdu speech (Dates/Times).
+    # Arabic = Zeina (Female), Urdu = Google (Fast & Reliable)
+    voice_map = {"English": "Polly.Joanna-Neural", "Urdu": "Google.ur-PK-Standard-A", "Arabic": "Polly.Zeina"}
     tw_lang_map = {"English": "en-US", "Urdu": "ur-PK", "Arabic": "ar-XA"}
     
     resp = VoiceResponse()
+    gather = resp.gather(input='speech', action='/handle', timeout=5, language=tw_lang_map.get(lang, "en-US"))
     
-    # SIMPLIFIED GATHER LOGIC to prevent Loop/Crash
-    if lang == "Urdu":
-         gather = resp.gather(input='speech', action='/handle', timeout=4, language='ur-PK')
-         gather.say(ai_msg, voice='Google.ur-PK-Standard-A')
-    elif lang == "Arabic":
-         gather = resp.gather(input='speech', action='/handle', timeout=4, language='ar-XA')
-         gather.say(ai_msg, voice='Polly.Zeina')
-    else:
-         gather = resp.gather(input='speech', action='/handle', timeout=4, language='en-US')
-         gather.say(ai_msg, voice='Polly.Joanna-Neural')
+    # Use standard SAY for all languages to prevent lag. 
+    # Google Urdu is better than 5-second silence.
+    gather.say(ai_msg, voice=voice_map.get(lang, "Polly.Joanna-Neural"))
         
     resp.redirect('/handle')
     return str(resp)
