@@ -383,8 +383,8 @@ def index():
 @app.route('/incoming', methods=['POST'])
 def incoming_call():
     resp = VoiceResponse()
-    # 1. Faster Greeting + Language in one block
-    gather = resp.gather(num_digits=1, action='/select-language', timeout=5)
+    # 1. Faster Greeting + Language in one block (Force DTMF)
+    gather = resp.gather(num_digits=1, action='/select-language', input='dtmf', timeout=10)
     gather.say("As-Salamu Alaykum. I am Ayesha. For English, press 1. For Urdu, press 2. For Arabic, press 3.", voice='Polly.Joanna-Neural')
     resp.redirect('/voice') 
     return str(resp)
