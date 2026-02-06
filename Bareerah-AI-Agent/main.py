@@ -384,9 +384,13 @@ def index():
 def incoming_call():
     resp = VoiceResponse()
     # 1. Faster Greeting + Language in one block (Force DTMF)
+    # 1. Faster Greeting + Language in one block (Force DTMF)
     gather = resp.gather(num_digits=1, action='/select-language', input='dtmf', timeout=10)
     gather.say("As-Salamu Alaykum. I am Ayesha. For English, press 1. For Urdu, press 2. For Arabic, press 3.", voice='Polly.Joanna-Neural')
-    resp.redirect('/voice') 
+    
+    # If no input, hangup or loop ONCE (don't redirect consistently)
+    resp.say("I did not receive an input. Goodbye.", voice='Polly.Joanna-Neural')
+    resp.hangup()
     return str(resp)
 
 @app.route('/eleven-tts')
